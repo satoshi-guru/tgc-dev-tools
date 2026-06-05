@@ -1,0 +1,45 @@
+{
+  "skill_name": "design-review",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I want a live 'net worth' leaderboard in the game UI showing the top players across everyone who's linked. I haven't decided how to build it — help me design the right approach before I start.",
+      "expected_output": "A DESIGN-mode proposal: grounded in the live sidecar/game code (cited), offering 2+ genuinely different architectures (e.g. compute-on-read vs cached/materialized snapshot) each with honest costs, a concrete interface sketch (signatures/endpoint/schema), the event-loop + N+1 risks named, and a defended recommendation.",
+      "files": [],
+      "expectations": [
+        "Grounds in the live code with file:line citations for where linked-player data and the existing rank/broadcast machinery live (e.g. _fetch_linked_players* in discord_sidecar.py)",
+        "Proposes two or more genuinely different architectures (e.g. compute-on-read vs cached/periodic-snapshot leaderboard)",
+        "Names concrete COSTS for each option, not just benefits",
+        "Gives a concrete interface sketch (real function signatures / endpoint / schema), not prose descriptions",
+        "Flags the event-loop offload constraint and the per-player aggregation / N+1 risk for a cross-player leaderboard",
+        "Makes and defends a single recommendation"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Quick design check before I build this. I'm adding a /api/game/networth endpoint to the sidecar (discord_sidecar.py). On each call it opens game.db, runs a SELECT over the player's inventory rows, sums the item values, and returns the net worth. I'll just use the sqlite3 cursor directly inside the async handler since it's a fast query. Does this approach look right, or would you change the shape before I write it?",
+      "expected_output": "A REVIEW-mode critique that catches the blocking sqlite-on-event-loop issue (with the to_thread fix), catches the auth header-split risk for a browser-facing endpoint, cites file:line for claims about current code, confirms the sidecar is the right target, and produces a verdict doc with severity-ordered concerns.",
+      "files": [],
+      "expectations": [
+        "Identifies that synchronous sqlite3 inside the async handler blocks the event loop and recommends asyncio.to_thread",
+        "Catches the auth header split — a browser-facing sidecar endpoint must verify the X-TGC-Web-Token path, not just X-Bot-Token",
+        "Cites file:line evidence for claims about the current code (e.g. the to_thread pattern or the auth gate)",
+        "Confirms the sidecar (:8001) is the correct target for a game-UI endpoint",
+        "Produces a review doc with an explicit verdict and severity-ordered concerns"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Planning a cleanup-plus-feature pass. I want to add a /link-wallet Discord command so players can connect their wallet to their account. While I'm in there I'll also delete the okx_client module and a bunch of link helper functions that look unused. Sound like a good plan?",
+      "expected_output": "A REVIEW-mode critique that flags the duplicate/retired command (cited), identifies the two okx_clients (one live) with line-cited evidence, pushes back on deleting live helpers with call-site evidence, recommends fail-loud + CODE-NOTE over deletion, and separates cleanup from feature.",
+      "files": [],
+      "expectations": [
+        "Warns to check existing /link commands and cites the retired /link + existing /link-sol/-evm/-key with file:line",
+        "Identifies that there are TWO okx_client modules, one live (datacollector) and one stub, with line-cited evidence",
+        "Pushes back on deleting the 'unused' helpers using actual call-site evidence rather than the name alone",
+        "Recommends fail-loud (raise NotImplementedError) + CODE-NOTE marker over deletion, per the implement-don't-delete convention",
+        "Separates the cleanup concern from the feature concern and gives an explicit verdict"
+      ]
+    }
+  ]
+}

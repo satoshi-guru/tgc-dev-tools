@@ -20,7 +20,9 @@ tgc-dev-tools/
 │   ├── gemini-review/          # Quality gate before porting Gemini's code
 │   ├── port-feature/           # Guided feature extraction game-backend → main
 │   ├── start-coding-session/   # Session context loader + task intake
-│   └── analyze-trade/          # Deep-dive closed trade analysis
+│   ├── analyze-trade/          # Deep-dive closed trade analysis
+│   ├── llmdoc/                 # Fetch library docs locally as LLM-ready markdown
+│   └── design-review/          # Design partner: design + pressure-test code BEFORE you build it
 └── install.sh                  # One-command install into any project
 ```
 
@@ -112,6 +114,28 @@ Deep-dive analysis of a single closed trade via SSH to VPS.
 Queries `memory.db` and DCL candles to explain entry, exit, TP/SL outcome.
 
 Usage: `/analyze-trade <oid>` or `/analyze-trade BTC 14:30`
+
+---
+
+### `/design-review`
+A principal-engineer **design partner** for code that *doesn't exist yet*. Two modes:
+
+- **DESIGN** — "help me design X / where should this live / what's the cleanest way
+  to add Y" → proposes 2+ architectures with real code/interface sketches, honest
+  trade-offs, and a defended recommendation.
+- **REVIEW** — "is this the right shape / pressure-test this before I build it" →
+  verdict + severity-ordered concerns, each with why-it-matters and a concrete fix.
+
+Both modes **ground in the live source** (reads the maintained `*_CLAUDE.md` /
+`*_SOUL.md` docs + the actual files, cites `file:line`, never reasons from memory)
+and surface the second-order effects — broken invariants, hidden coupling, blocking
+I/O on the event loop, duplicate features. Output is a short doc saved to
+`design-reviews/`, ending in a handoff to `/writing-plans`.
+
+**When to use**: at the *front* of any new feature/refactor, before writing code, or
+to pressure-test an approach (including a Gemini branch's architecture) before
+committing to it. It is the design counterpart to `/code-review` (which reviews an
+existing diff). See `skills/design-review/README.md` for the full guide.
 
 ---
 
