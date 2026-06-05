@@ -30,11 +30,13 @@ for f in "$SCRIPT_DIR/commands/"*.md; do
   echo "  [command] $name"
 done
 
-# Install skills (each skill is a directory with SKILL.md)
-for skill_dir in "$SCRIPT_DIR/skills/"/*/; do
+# Install skills (each skill is a directory; copy SKILL.md + any references/,
+# assets/, and bundled files like PRESETS.md — but not eval scaffolding).
+for skill_dir in "$SCRIPT_DIR/skills/"*/; do
   name=$(basename "$skill_dir")
   mkdir -p "$DEST/skills/$name"
-  cp "$skill_dir/SKILL.md" "$DEST/skills/$name/SKILL.md"
+  cp -r "$skill_dir." "$DEST/skills/$name/"
+  rm -rf "$DEST/skills/$name/evals"   # evals are for testing the skill, not runtime
   echo "  [skill] $name"
 done
 
