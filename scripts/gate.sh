@@ -6,11 +6,12 @@
 #   2. agents/*.md and skills/*/SKILL.md carry YAML frontmatter with name + description;
 #      commands/*.md are non-empty
 #   3. .claude/agents/*.md pass ~/.claude/scripts/dev/agent-file-check.py (skipped with a note if the store is absent)
-#   4. install.sh into a temp dir installs every agent, command and skill dir of this repo (counts match)
+#   4. install.sh into a temp dir installs every agent, command and skill dir of this repo (counts match) and
+#      the result is in step with the source file by file (scripts/install-status.sh)
 #   5. install.sh has no default destination (static read of the file; the gate never runs it without one)
 #   6. README.md lists every agent, command, skill and script (scripts/readme-listing-check.sh; skipped without README.md)
 # Usage:  scripts/gate.sh            # run from anywhere; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 3 broken fixtures and pass on 2 good ones
+#          scripts/gate.sh --selftest # proves the checks fail on 4 broken fixtures and pass on 2 good ones
 set -uo pipefail
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
@@ -65,6 +66,15 @@ run_checks() {
       w="$(find "$root/agents" -maxdepth 1 -name '*.md' | wc -l)/$(find "$root/commands" -maxdepth 1 -name '*.md' | wc -l)/$(find "$root/skills" -mindepth 1 -maxdepth 1 -type d | wc -l)"
       g="$(find "$tmp/dest/agents" -maxdepth 1 -name '*.md' | wc -l)/$(find "$tmp/dest/commands" -maxdepth 1 -name '*.md' | wc -l)/$(find "$tmp/dest/skills" -mindepth 1 -maxdepth 1 -type d | wc -l)"
       [ "$w" = "$g" ] || fail "install.sh counts agents/commands/skills want $w got $g"
+      # issue #6: counts alone do not prove content - the fresh install must be in step file by file
+      local stater
+      stater="$(dirname "$SELF")/install-status.sh"
+      if [ -f "$stater" ]; then
+        if ! out="$(bash "$stater" --source "$root" "$tmp/dest" 2>&1)"; then
+          fail "fresh install is not in step with the source (scripts/install-status.sh)"
+          printf '%s\n' "$out"
+        fi
+      fi
     else
       fail "install.sh into temp dir"
     fi
@@ -102,6 +112,10 @@ selftest() {
   cp -r "$t/good" "$t/default"
   printf 'DEST="${1:-/nonexistent/.claude}"\n' >> "$t/default/install.sh"
   run_checks "$t/default" >/dev/null && { echo "selftest FAIL: default destination accepted"; rc=1; }
+  # tamper: good fixture whose install.sh installs every file but alters one -> counts match, content does not (check 4)
+  cp -r "$t/good" "$t/tamper"
+  printf 'printf "altered\\n" >> "$DEST/agents/a.md"\n' >> "$t/tamper/install.sh"
+  run_checks "$t/tamper" >/dev/null && { echo "selftest FAIL: altered install accepted"; rc=1; }
   # listed / drift: good fixture with a README that names everything -> accepted, one that names nothing -> rejected (check 6)
   cp -r "$t/good" "$t/listed"
   printf '# f\n\n```\nf/\n├── agents/\n│   └── a.md\n├── commands/\n│   └── c.md\n├── skills/\n│   └── x/\n└── install.sh\n```\n\n### `a`\n\n### `/c`\n\n### `/x`\n' > "$t/listed/README.md"
