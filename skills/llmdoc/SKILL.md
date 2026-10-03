@@ -1,11 +1,14 @@
 ---
 name: llmdoc
-description: Fetch docs for any library and save them locally as LLM-ready markdown under docs/<slug>/. Use BEFORE writing config or code for an unfamiliar or recently-changed library API. Use immediately when a first install/build/run attempt fails — don't retry with workarounds first.
+description: Fetch docs for any library and save them as LLM-ready markdown in the GLOBAL store (~/.llmdocs/docs/<slug>/), available to every repo. Use BEFORE writing config or code for an unfamiliar or recently-changed library API. Use immediately when a first install/build/run attempt fails — don't retry with workarounds first.
 argument-hint: "[alias | <url>] — see presets table below"
 allowed-tools: Bash Read WebFetch WebSearch
 ---
 
-Fetch documentation and save to `docs/<slug>/` in the current project.
+Fetch documentation and save it to the **global append-only doc store** at
+`~/.llmdocs/docs/<slug>/` (symlinked at `~/.claude/docs/`). Docs land there once and
+are available to **every** repo — never siloed per project. Versions never matter:
+new fetches **add** to the store, they never replace what's already there.
 
 Arguments: $ARGUMENTS
 
@@ -17,11 +20,13 @@ Arguments: $ARGUMENTS
 | expo | https://docs.expo.dev |
 | expo-router | https://docs.expo.dev/router/introduction/ |
 | expo-notifications | https://docs.expo.dev/versions/latest/sdk/notifications/ |
+| expo-device | https://docs.expo.dev/versions/latest/sdk/device/ |
 | react-native | https://reactnative.dev/docs/getting-started |
 | react-navigation | https://reactnavigation.org/docs/getting-started |
 | reanimated | https://docs.swmansion.com/react-native-reanimated/ |
 | nativewind | https://www.nativewind.dev/docs |
 | supabase | https://supabase.com/docs/reference/javascript/introduction |
+| supabase-js | https://supabase.com/docs/reference/javascript/introduction |
 | tailwind | https://tailwindcss.com/docs |
 | typescript | https://www.typescriptlang.org/docs/ |
 | zod | https://zod.dev |
@@ -53,20 +58,21 @@ Arguments: $ARGUMENTS
 | Alias | Fetches |
 |-------|---------|
 | discordpy | https://discordpy.readthedocs.io/en/stable/ |
-| discord-api | https://discord.com/developers/docs/intro |
+| discord / discord-api | **engine preset** → `--preset discord` (React SPA → GitHub strategy; a plain `--url` fetches 0 pages) |
 
 ### AI / LLM / Agents
 | Alias | Fetches |
 |-------|---------|
-| anthropic | https://docs.anthropic.com/en/api/ |
+| anthropic | **engine preset** → `--preset anthropic` (crawls `/en` — guides + API reference) |
 | openai-agents | https://openai.github.io/openai-agents-python/ |
-| openai | https://platform.openai.com/docs/overview |
+| openai | **engine preset** → `--preset openai` (crawls `/docs` — guides + API reference) |
 | mcp | https://modelcontextprotocol.io/docs/ |
 
 ### Crypto / Trading
 | Alias | Fetches |
 |-------|---------|
-| hyperliquid | https://hyperliquid.gitbook.io/hyperliquid-docs/ |
+| hyperliquid | **engine preset** → `--preset hyperliquid` (tuned GitBook selectors + path prefix) |
+| hypedexer | **engine preset** → `--preset hypedexer` (HL data API — fills, analytics, vaults) |
 | ethers | https://docs.ethers.org/v6/ |
 | viem | https://viem.sh/docs/getting-started |
 
@@ -96,30 +102,61 @@ Examples:
 
 ## Task
 
-1. **Parse $ARGUMENTS** — each token is one of:
-   - `preset:<group>` or `preset:<group1>+<group2>+...` → expand to the group's alias list (see PRESETS.md "Project Preset Groups"). Dedupe across multiple groups.
-   - A known alias from the preset table → map to the URL.
-   - Anything else → treat as a raw URL.
-2. For known aliases, map to the URL(s) in the alias tables. For unknown tokens, use as raw URL.
-3. Run the fetcher for each target:
+1. **Parse $ARGUMENTS** — resolve each token in THIS ORDER (first match wins). The order
+   matters because some sites can only be fetched correctly via an engine preset:
+   1. **Engine preset name** — one of the names from
+      `… llmdocs.py --list-presets` (currently `discord`, `hyperliquid`, `hypedexer`,
+      `openai`, `anthropic`; always run `--list-presets` for the live list). Fetch with
+      `--preset <name>`. The preset carries the per-site **strategy** and tuned crawl config:
+      e.g. `discord` uses the GitHub strategy because the Discord docs are a React SPA — a
+      plain `--url` crawl returns 0 usable pages. Engine presets are the curated, authoritative
+      definition for these sites, so they win over an alias of the same name.
+   2. **`preset:<group>`** (or `preset:<g1>+<g2>+...`) → expand to the group's alias list (see
+      PRESETS.md "Project Preset Groups"). Dedupe across groups, then resolve each resulting
+      token by this same 1→4 order (so a group member that names an engine preset still routes
+      via `--preset`).
+   3. **Known alias** from the tables above → fetch with `--url <mapped-url>` (default HTTP).
+   4. **Anything else** → treat the token as a raw URL → `--url <token>`.
+2. Build the command per token using the flag chosen above — `--preset` for case 1, `--url`
+   for cases 3–4.
+3. Run the fetcher for each target.
 
-```bash
-/home/rootvault/Dokumente/llmdocs/.venv/bin/python \
-  /home/rootvault/Dokumente/llmdocs/llmdocs.py \
-  --url <URL> \
-  --workers 4 --rate-limit 0.25 \
-  --out docs/<slug>/
-```
+   **Case 1 (engine preset):**
+   ```bash
+   /home/rootvault/Dokumente/llmdocs-publish/.venv/bin/python \
+     /home/rootvault/Dokumente/llmdocs-publish/llmdocs.py \
+     --preset <name> --archive-existing
+   ```
+   No `--out` needed: the engine redirects preset output to `~/.llmdocs/docs/<name>/` with a
+   clean slug automatically. Pass `--out ~/.llmdocs/docs/<slug>/` only to force a custom slug.
+
+   **Cases 3–4 (alias / raw URL):**
+   ```bash
+   /home/rootvault/Dokumente/llmdocs-publish/.venv/bin/python \
+     /home/rootvault/Dokumente/llmdocs-publish/llmdocs.py \
+     --url <URL> \
+     --workers 4 --rate-limit 0.25 --archive-existing \
+     --out ~/.llmdocs/docs/<slug>/
+   ```
+
+(If you omit `--out` on the `--url` path, the fetcher already defaults to
+`~/.llmdocs/docs/<slug>/` — overridable with `$LLMDOCS_HOME`. Passing it explicitly keeps the
+slug clean.)
 
 The fetcher defaults: `--max-pages 5000`, `--workers 1`, `--rate-limit 0.5`, auto-deletes `_raw_html/` cache after success. For **batch refresh (preset groups, multiple libs)** always pass `--workers 4 --rate-limit 0.25` — gives ~3.5x speedup with same effective per-host rate (1 req/sec across workers). For single ad-hoc fetches, defaults are fine.
 
-Skip patterns built-in: non-English locales (`/fr/`, `/zh_HANS-CN/`), version-pinned paths (`/2.43.0/`), and version aliases (`/latest/`, `/main/`, `/master/`, `/dev/`). Pass `--keep-html` only when debugging.
+Skip patterns built-in: non-English locales (`/fr/`, `/zh_HANS-CN/`), version-pinned paths (`/2.43.0/`), and version aliases (`/latest/`, `/main/`, `/master/`, `/dev/`). Pass `--keep-html` only when debugging. `--archive-existing` (set above for store fetches) moves any existing copy to `~/.llmdocs/docs/.archive/<slug>@<engine>-<ts>/` before writing, so re-fetches never overwrite — old versions are kept.
 
 Where `<slug>` is the alias name or a kebab-case version of the URL's hostname/path.
-Output goes to `docs/<slug>/` relative to the current working directory.
+Output goes to the global store `~/.llmdocs/docs/<slug>/` — the same path regardless of
+which repo you run from. **Never** write docs into the current project's `./docs/`.
 
 4. Run targets sequentially (each fetch is network-bound).
 5. After each fetch: report target, pages written, output path, any errors.
 6. **After ALL fetches succeed, auto-chain `/doc-indexer`** for every freshly-fetched lib. This builds the `COMPACT.md` token-cheap layer (~800 tokens vs ~40k raw) that downstream sessions read by default. Never skip this step — the indexed layer is the point of the workflow.
-7. Final summary table: alias → pages → path → COMPACT.md status.
-8. Tell the user: "Docs available at @docs/<slug>/ — use COMPACT.md for cheap lookups, raw .md files for deep dives."
+7. **Refresh the store manifest** so what we've gathered stays tracked:
+   ```bash
+   python3 /home/rootvault/Dokumente/llmdocs-publish/scripts/manifest.py
+   ```
+8. Final summary table: alias → pages → path → COMPACT.md status.
+9. Tell the user: "Docs available globally at ~/.llmdocs/docs/<slug>/ (also @~/.claude/docs/<slug>/) — use COMPACT.md for cheap lookups, raw .md files for deep dives. Available to every repo. Manifest: ~/.llmdocs/MANIFEST.md"
