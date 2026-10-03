@@ -112,6 +112,11 @@ State measured on 2026-10-03 (issue #6). Nobody has installed since; the gap is 
 `differs=0` in both: every copy that is installed is identical to this repo, so an install would only add files
 there and overwrite nothing with other content. Whether `hl_game_backend` should get the full set is an open
 decision of the repo owner (issue #6) — this README does not claim that any tool is left out on purpose.
+The three skills missing in `hl_claw_bot` (`design-review`, `llmdoc`, `session-init`) exist under the same name in
+`~/.claude/skills/`, as does `start-coding-session`; the other four skills, both agents and both commands do not
+(read-only `ls`, 2026-10-03). A session in either repo therefore already sees a global skill of those four names,
+and an install adds a project copy next to it — for `session-init` the older one (see "Drift" below, issue #3).
+Which copy Claude Code uses when both exist was not verified here.
 `hl_claw_bot/.claude/commands/start-coding-session.md` does not come from this repo (here `start-coding-session`
 is a skill); an install neither updates nor removes it.
 
