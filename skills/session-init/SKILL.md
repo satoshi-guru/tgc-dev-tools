@@ -5,7 +5,15 @@ disable-model-invocation: true
 allowed-tools: Read Bash Glob Grep TaskCreate TaskUpdate
 ---
 
-You are starting a new working session. Follow these steps in order.
+You are starting a new working session.
+
+**Shortcut (since 2026-09-17):** if `~/.claude/scripts/dev/context.py` exists, run
+`python3 ~/.claude/scripts/dev/context.py` (add `--full` for the whole handoff, `--no-health` to skip
+`repo-health.sh`), print its output as the brief and stop — it renders the same sections as Steps 1–6 below from
+`.claude/session-init.yml` deterministically in ~5k tokens (the manual path cost ~150k on 2026-09-16). Fall back to
+the steps below only when the program is missing or errors out.
+
+Follow these steps in order.
 
 ### Step 1 — Detect context
 

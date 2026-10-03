@@ -1,8 +1,52 @@
-# llmdoc Presets — Full Library Reference
+# PRESETS — project preset groups for /llmdoc
 
-All aliases usable with `/llmdoc <alias>`. Each maps to the canonical docs URL.
+`/llmdoc preset:<group>` expands a group to its alias list; each alias is then resolved
+against the `llmdoc` skill's alias tables (the single source of truth). Combine groups
+with `+` (`/llmdoc preset:keyo+discord-bot`); aliases are deduped before fetching.
 
-## Frontend / React Native (keyo)
+**Every alias used below must exist in `SKILL.md`'s alias tables — add new aliases there,
+not here.**
+
+## Project Preset Groups
+
+| Group | Aliases |
+|-------|---------|
+| `keyo` | expo, expo-router, expo-notifications, expo-device, supabase, react-native |
+| `hl_game` | python, asyncio, fastapi, pydantic, httpx, websockets, pytest, hyperliquid |
+| `hl_claw` | python, asyncio, httpx, websockets, pytest, hyperliquid |
+| `discord-bot` | discordpy, discord-api |
+| `notion-workspace` | notion |
+
+## Not yet defined (referenced in examples — add when needed)
+
+- `x-promo` — X/Twitter promotion stack. No X/Twitter alias exists in `SKILL.md` yet;
+  add one (and the group) before using `preset:x-promo`.
+
+## Adding a group
+
+1. Ensure each alias exists in `SKILL.md`'s alias tables (add the row if missing).
+2. Add a row here mapping `<group>` → comma-separated alias list.
+Groups are derived from the per-project presets in `~/.claude/CLAUDE.md`; keep them in sync.
+
+---
+
+<!-- END OF THE ACTIVE FILE. Everything above this rule is ~/.claude/skills/llmdoc/PRESETS.md verbatim
+     (checked by scripts/skill-drift.sh of tgc-dev-tools). Everything below exists only in tgc-dev-tools. -->
+
+# SUPERSEDED 2026-10-03 (tgc-dev-tools issue #3) — old content of this file, not active
+
+**Do not expand `preset:` groups and do not resolve aliases from anything below this heading.** The active groups
+are the table "Project Preset Groups" above; the alias tables live in `SKILL.md` (single source of truth).
+
+What follows is the version of this file that tgc-dev-tools carried until 2026-10-03 (former title: "llmdoc
+Presets — Full Library Reference"). It is kept because content is never removed without a trace, and because it
+names four groups the active table does not have — `hl_bot`, `x-promo`, `gaming-studio`, `happy-tool` (two of
+`happy-tool`'s aliases, `drizzle-orm` and `fastify`, were never defined in `SKILL.md`). To revive a group, add it
+to the active table above **and** to `~/.claude/skills/llmdoc/PRESETS.md`, following "Adding a group".
+
+Former intro: All aliases usable with `/llmdoc <alias>`. Each maps to the canonical docs URL.
+
+## Superseded alias table — Frontend / React Native (keyo)
 | Alias | URL |
 |-------|-----|
 | expo | https://docs.expo.dev |
@@ -23,7 +67,7 @@ All aliases usable with `/llmdoc <alias>`. Each maps to the canonical docs URL.
 | vitest | https://vitest.dev/guide |
 | prisma | https://www.prisma.io/docs |
 
-## Python Backend (hl_claw_bot / hl_game_backend)
+## Superseded alias table — Python Backend (hl_claw_bot / hl_game_backend)
 | Alias | URL |
 |-------|-----|
 | python | https://docs.python.org/3/ |
@@ -40,13 +84,13 @@ All aliases usable with `/llmdoc <alias>`. Each maps to the canonical docs URL.
 | sentence-transformers | https://sbert.net/ |
 | pygithub | https://pygithub.readthedocs.io/en/stable/ |
 
-## Discord
+## Superseded alias table — Discord
 | Alias | URL |
 |-------|-----|
 | discordpy | https://discordpy.readthedocs.io/en/stable/ |
 | discord-api | https://discord.com/developers/docs/intro |
 
-## AI / LLM / Agents
+## Superseded alias table — AI / LLM / Agents
 | Alias | URL |
 |-------|-----|
 | anthropic | https://docs.anthropic.com/en/api/ |
@@ -54,14 +98,14 @@ All aliases usable with `/llmdoc <alias>`. Each maps to the canonical docs URL.
 | openai | https://platform.openai.com/docs/overview |
 | mcp | https://modelcontextprotocol.io/docs/ |
 
-## Crypto / Trading
+## Superseded alias table — Crypto / Trading
 | Alias | URL |
 |-------|-----|
 | hyperliquid | https://hyperliquid.gitbook.io/hyperliquid-docs/ |
 | ethers | https://docs.ethers.org/v6/ |
 | viem | https://viem.sh/docs/getting-started |
 
-## Infrastructure / Data
+## Superseded alias table — Infrastructure / Data
 | Alias | URL |
 |-------|-----|
 | sqlite | https://www.sqlite.org/docs.html |
@@ -71,11 +115,9 @@ All aliases usable with `/llmdoc <alias>`. Each maps to the canonical docs URL.
 | bash | https://www.gnu.org/software/bash/manual/bash.html |
 | nginx | https://nginx.org/en/docs/ |
 
----
+## Superseded group table (former heading "Project Preset Groups") — not active, see the table at the top
 
-# Project Preset Groups
-
-One-liner refresh per project. Invoke with `/llmdoc preset:<group>` — fetches every lib in the group sequentially.
+Former intro: One-liner refresh per project. Invoke with `/llmdoc preset:<group>` — fetches every lib in the group sequentially.
 
 **Fusion syntax** for cross-workspace tasks: combine with `+` (e.g. `/llmdoc preset:notion-workspace+x-promo+discord-bot` for a coordinated Notion/X/Discord push). Duplicates are deduped before fetching.
 
