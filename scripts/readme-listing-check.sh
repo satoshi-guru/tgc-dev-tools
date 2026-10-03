@@ -7,7 +7,7 @@
 #   3. programs: install.sh and every scripts/*.sh that exists is named in README.md (path as written here)
 #   4. stale:    every entry the README tree lists under agents/, commands/, skills/ exists on disk
 # Usage:   scripts/readme-listing-check.sh [ROOT]      # ROOT defaults to the repo this script lives in
-#          scripts/readme-listing-check.sh --selftest  # proves a complete README passes and three drifts fail
+#          scripts/readme-listing-check.sh --selftest  # proves a complete README passes and four kinds of drift fail
 # Output:  one "MISSING <kind>: <name>" or "STALE <kind>: <name>" line per gap, then the last line
 #          "readme-listing: ok checks=N" or "readme-listing: FAILED gaps=K checks=N"
 # Exit:    0 no gap · 1 gaps (or no README.md) · 2 usage

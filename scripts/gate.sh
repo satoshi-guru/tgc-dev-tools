@@ -10,7 +10,7 @@
 #   5. install.sh has no default destination (static read of the file; the gate never runs it without one)
 #   6. README.md lists every agent, command, skill and script (scripts/readme-listing-check.sh; skipped without README.md)
 # Usage:  scripts/gate.sh            # run from anywhere; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on a broken fixture and pass on a good one
+#          scripts/gate.sh --selftest # proves the checks fail on 3 broken fixtures and pass on 2 good ones
 set -uo pipefail
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"

@@ -20,31 +20,59 @@ tgc-dev-tools/
 │   ├── gemini-review/          # Quality gate before porting Gemini's code
 │   ├── port-feature/           # Guided feature extraction game-backend → main
 │   ├── start-coding-session/   # Session context loader + task intake
+│   ├── session-init/           # Session start from .claude/session-init.yml (worktree, plan, feedback memory)
 │   ├── analyze-trade/          # Deep-dive closed trade analysis
 │   ├── llmdoc/                 # Fetch library docs locally as LLM-ready markdown
 │   └── design-review/          # Design partner: design + pressure-test code BEFORE you build it
-└── install.sh                  # One-command install into any project
+├── scripts/
+│   ├── gate.sh                 # Offline gate for this repo (not installed) — see "Gate"
+│   └── readme-listing-check.sh # Does this README list every agent, command, skill and script?
+├── .claude/agents/             # Board role files bb-* for this repo's own build lanes (not installed)
+└── install.sh                  # One-command install into a project's .claude (destination required)
 ```
+
+`install.sh` copies only `agents/`, `commands/` and `skills/`. `scripts/` and `.claude/` stay in this repo.
 
 ---
 
 ## Install
 
-Copy tools into a project's `.claude/` directory:
+Copy tools into a project's `.claude/` directory. The destination is **required** — there is no default.
+A bare `./install.sh` prints the usage and exits 2 without writing anything (until issue #4 it silently
+installed into `hl_claw_bot`).
 
 ```bash
-# Install into hl_claw_bot (default)
-./install.sh
+# Install into hl_claw_bot
+./install.sh /home/rootvault/Dokumente/hl_claw_bot/.claude
+
+# Install into hl_game_backend
+./install.sh /home/rootvault/Dokumente/hl_game_backend/.claude
 
 # Install into a different project
 ./install.sh /path/to/your-project/.claude
+
+# Usage text
+./install.sh --help
 ```
 
-Or install globally (available in all projects):
+What the install does:
+
+- The destination is the `.claude` directory itself; it receives `agents/`, `commands/` and `skills/`.
+- Files of the same name in the destination are **overwritten**; a skill's `evals/` folder is not installed.
+- `hl_claw_bot` and `hl_game_backend` both list `.claude/` in their `.gitignore`. Installed copies are therefore
+  untracked there: they do not show up in `git status`, are not part of a clone, and every checkout or worktree
+  of those repos needs its own install. This repo is the only versioned source — edit here, then reinstall.
+
+Installing globally is possible, but read this first:
 
 ```bash
 ./install.sh ~/.claude
 ```
+
+`~/.claude/skills/` already holds skills of the same name that have **drifted** from this repo (tracked in
+issue #3; on 2026-10-03 the `SKILL.md` of `llmdoc`, `start-coding-session` and `session-init` differed from the
+global copies). A global install overwrites them with the versions from this repo, which are not always the
+newer ones. Compare before you run it.
 
 ---
 
@@ -109,11 +137,43 @@ Outputs: current phase, test count, then waits for the task.
 
 ---
 
+### `/session-init`
+Starts a working session from the project's own config. User-invoked only (`disable-model-invocation: true`).
+
+- Detects whether the cwd is a git worktree and shows branch + last 3 commits
+- Reads `.claude/session-init.yml` of the project (`required_reads`, `conditional_reads`, `buildlog_tail`,
+  `test_cmd`, `health_checks`); without that file it falls back to `git status` + the tail of `CLAUDE.md`
+- On a feature branch reads `SESSION_STATE.<branch-slug>.md` instead of `SESSION_STATE.md`
+- Picks the active plan from `~/.claude/plans/`, scoped to the current repo by the plan's `**Repo:**` line
+  (so an `hl_game_backend` plan does not seed an `hl_claw_bot` session), and seeds the task list from its open items
+- Reads every `feedback_*.md` of the project memory in full, then prints a compact session brief
+
+**When to use**: Start of a session in a project that carries a `.claude/session-init.yml`.
+
+**Drift**: the copy in `~/.claude/skills/session-init/` is newer (2026-09-17: it adds a shortcut through
+`~/.claude/scripts/dev/context.py`); the copy in this repo dates from 2026-06-05 and lacks it. Reconciling is issue #3.
+
+---
+
 ### `analyze-trade`
 Deep-dive analysis of a single closed trade via SSH to VPS.
 Queries `memory.db` and DCL candles to explain entry, exit, TP/SL outcome.
 
 Usage: `/analyze-trade <oid>` or `/analyze-trade BTC 14:30`
+
+---
+
+### `/llmdoc`
+Fetches the documentation of a library and saves it as LLM-ready markdown under `docs/<slug>/` of the current project.
+
+- Argument: a known alias (`fastapi`, `hyperliquid`, `expo`, …), a raw URL, or `preset:<group>` — groups live in
+  `skills/llmdoc/PRESETS.md` and combine with `+` (`/llmdoc preset:hl_game`)
+- Chains `/doc-indexer` afterwards to build the token-cheap `COMPACT.md` layer
+
+**When to use**: Before writing config or code against an unfamiliar or recently changed library API, and right
+after a first install/build/run attempt fails.
+
+**Drift**: this copy differs from `~/.claude/skills/llmdoc/` (global copy from 2026-09-10); see issue #3 and PR #1.
 
 ---
 
@@ -171,6 +231,37 @@ Emergency VPS rescue sequence. Closes all positions, resets drawdown peak, resto
 
 ---
 
+## Gate
+
+`scripts/gate.sh` is the only gate of this repo (there is no build file). It runs offline in a few seconds and is
+what the fleet board runs before a PR is merged. Run it before every commit that touches a tool file:
+
+```bash
+scripts/gate.sh             # last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
+scripts/gate.sh --selftest  # proves the checks reject broken fixtures and accept good ones
+```
+
+What it checks:
+
+1. `bash -n` over `install.sh` and every `scripts/*.sh`
+2. `agents/*.md` and `skills/*/SKILL.md` carry YAML frontmatter with `name` + `description`; `commands/*.md` are non-empty
+3. `.claude/agents/*.md` pass `~/.claude/scripts/dev/agent-file-check.py` (skipped with a note when that store is absent)
+4. `install.sh` into a temp dir installs every agent, command and skill dir (counts match)
+5. `install.sh` has no default destination (read statically — the gate never runs it without a destination)
+6. This README lists every agent, command, skill and script — via `scripts/readme-listing-check.sh`
+
+`scripts/readme-listing-check.sh` can be run on its own. It compares the tree in "What's Inside" and the `###`
+headings with `agents/`, `commands/`, `skills/` on disk, in both directions:
+
+```bash
+scripts/readme-listing-check.sh             # "MISSING …"/"STALE …" lines, then "readme-listing: ok checks=N" or "FAILED gaps=K"
+scripts/readme-listing-check.sh --selftest
+```
+
+So a new skill, agent or command needs a tree line **and** a `###` section here, or the gate is red.
+
+---
+
 ## Update Workflow
 
 When you improve a skill or agent:
@@ -184,11 +275,13 @@ git add skills/gemini-review/SKILL.md
 git commit -m "feat(gemini-review): add pattern N — <description>"
 git push origin main
 
-# 3. Reinstall into the project
+# 3. Reinstall into each project that uses it (the destination is required)
 ./install.sh /home/rootvault/Dokumente/hl_claw_bot/.claude
+./install.sh /home/rootvault/Dokumente/hl_game_backend/.claude
 ```
 
-That's the full loop. Three commands to update any tool everywhere.
+That's the full loop. Run `scripts/gate.sh` before step 2; a new skill, agent or command also needs its tree line
+and `###` section in this README (the gate checks it).
 
 ---
 
