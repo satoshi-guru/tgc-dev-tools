@@ -2,13 +2,49 @@
 # install.sh — install tgc-dev-tools into a Claude Code project
 #
 # Usage:
-#   ./install.sh                                      # install into hl_claw_bot (default)
-#   ./install.sh /path/to/project/.claude             # install into specific project
-#   ./install.sh ~/.claude                            # install globally
+#   ./install.sh <destination>                        # destination is required, there is no default
+#   ./install.sh /home/rootvault/Dokumente/hl_claw_bot/.claude
+#   ./install.sh /home/rootvault/Dokumente/hl_game_backend/.claude
+#   ./install.sh /path/to/project/.claude             # any other project
+#   ./install.sh --help
+#
+# <destination> is the .claude directory itself (it receives agents/, commands/, skills/).
+# Same-named files in the destination are overwritten. Both target repos list .claude/ in
+# their .gitignore, so the installed copies are untracked there; this repo is the versioned source.
+# ~/.claude as destination overwrites the global skills of the same name, which have drifted
+# from this repo (issue #3) - compare first.
+# Exit: 0 installed · 2 no destination given
 
 set -euo pipefail
 
-DEST="${1:-/home/rootvault/Dokumente/hl_claw_bot/.claude}"
+usage() {
+  cat <<'USAGE'
+Usage: ./install.sh <destination>
+
+  <destination>  the .claude directory to install into, for example
+                   /home/rootvault/Dokumente/hl_claw_bot/.claude
+                   /home/rootvault/Dokumente/hl_game_backend/.claude
+
+Copies agents/*.md, commands/*.md and every skills/<name>/ of this repo into
+<destination>, overwriting files of the same name. There is no default destination.
+USAGE
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  "")
+    usage >&2
+    echo "install.sh: destination required (nothing installed)" >&2
+    exit 2
+    ;;
+esac
+
+# Superseded by issue #4 (a bare ./install.sh wrote into hl_claw_bot without being asked):
+# DEST="${1:-/home/rootvault/Dokumente/hl_claw_bot/.claude}"
+DEST="$1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "Installing tgc-dev-tools into: $DEST"
