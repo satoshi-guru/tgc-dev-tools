@@ -7,7 +7,9 @@
 #      commands/*.md are non-empty
 #   3. .claude/agents/*.md pass ~/.claude/scripts/dev/agent-file-check.py (skipped with a note if the store is absent)
 #   4. install.sh into a temp dir installs every agent, command and skill dir of this repo (counts match)
-# Usage:   scripts/gate.sh            # run from anywhere; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
+#   5. install.sh has no default destination (static read of the file; the gate never runs it without one)
+#   6. README.md lists every agent, command, skill and script (scripts/readme-listing-check.sh; skipped without README.md)
+# Usage:  scripts/gate.sh            # run from anywhere; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
 #          scripts/gate.sh --selftest # proves the checks fail on a broken fixture and pass on a good one
 set -uo pipefail
 
@@ -67,6 +69,19 @@ run_checks() {
       fail "install.sh into temp dir"
     fi
     rm -rf "$tmp"
+    # a non-comment "${1:-something}" is a default destination: a bare ./install.sh would write somewhere unasked
+    if grep -v '^[[:space:]]*#' "$root/install.sh" | grep -q -E '\$\{1:-[^}]'; then
+      fail "install.sh has a default destination (issue #4: the destination must be given)"
+    fi
+  fi
+
+  local lister
+  lister="$(dirname "$SELF")/readme-listing-check.sh"
+  if [ -f "$root/README.md" ] && [ -f "$lister" ]; then
+    if ! out="$(bash "$lister" "$root" 2>&1)"; then
+      fail "README.md listing (scripts/readme-listing-check.sh)"
+      printf '%s\n' "$out"
+    fi
   fi
   [ "$FAILS" -eq 0 ]
 }
@@ -83,6 +98,17 @@ selftest() {
   printf 'echo "unterminated\n' > "$t/bad/install.sh"
   run_checks "$t/good" >/dev/null || { echo "selftest FAIL: good fixture rejected"; rc=1; }
   run_checks "$t/bad" >/dev/null && { echo "selftest FAIL: bad fixture accepted"; rc=1; }
+  # default: good fixture whose install.sh carries a default destination again -> rejected (check 5)
+  cp -r "$t/good" "$t/default"
+  printf 'DEST="${1:-/nonexistent/.claude}"\n' >> "$t/default/install.sh"
+  run_checks "$t/default" >/dev/null && { echo "selftest FAIL: default destination accepted"; rc=1; }
+  # listed / drift: good fixture with a README that names everything -> accepted, one that names nothing -> rejected (check 6)
+  cp -r "$t/good" "$t/listed"
+  printf '# f\n\n```\nf/\n├── agents/\n│   └── a.md\n├── commands/\n│   └── c.md\n├── skills/\n│   └── x/\n└── install.sh\n```\n\n### `a`\n\n### `/c`\n\n### `/x`\n' > "$t/listed/README.md"
+  run_checks "$t/listed" >/dev/null || { echo "selftest FAIL: listed fixture rejected"; rc=1; }
+  cp -r "$t/good" "$t/drift"
+  printf '# f\n\nnothing listed, install.sh\n' > "$t/drift/README.md"
+  run_checks "$t/drift" >/dev/null && { echo "selftest FAIL: README drift accepted"; rc=1; }
   rm -rf "$t"
   [ "$rc" -eq 0 ] && echo "selftest ok"
   return "$rc"
