@@ -26,6 +26,7 @@ tgc-dev-tools/
 │   └── design-review/          # Design partner: design + pressure-test code BEFORE you build it
 ├── scripts/
 │   ├── gate.sh                 # Offline gate for this repo (not installed) — see "Gate"
+│   ├── install-status.sh       # Is a project's .claude in step with this repo? Read-only — see "Installed state"
 │   └── readme-listing-check.sh # Does this README list every agent, command, skill and script?
 ├── .claude/agents/             # Board role files bb-* for this repo's own build lanes (not installed)
 └── install.sh                  # One-command install into a project's .claude (destination required)
@@ -73,6 +74,46 @@ Installing globally is possible, but read this first:
 issue #3; on 2026-10-03 the `SKILL.md` of `llmdoc`, `start-coding-session` and `session-init` differed from the
 global copies). A global install overwrites them with the versions from this repo, which are not always the
 newer ones. Compare before you run it.
+
+### Installed state
+
+Because the installed copies are untracked, nothing in `git status` of a target repo shows that it is behind.
+`scripts/install-status.sh` is the check. It only reads the destination and compares by name **and** content:
+
+```bash
+scripts/install-status.sh /home/rootvault/Dokumente/hl_claw_bot/.claude      # exit 0 in step · 1 behind · 2 usage
+scripts/install-status.sh /home/rootvault/Dokumente/hl_game_backend/.claude
+scripts/install-status.sh --rehearse /path/to/project/.claude                # what would an install change?
+scripts/install-status.sh --selftest
+```
+
+One line per tool, then `install-status: in step same=S extra=E` or
+`install-status: BEHIND missing=M differs=D same=S extra=E`:
+
+- `SAME` — installed, every file identical.
+- `MISSING` — not installed; `install.sh` would add it.
+- `DIFFERS` — installed with other content; `install.sh` would **overwrite** it. The differing files are listed with
+  the date of the last commit here and the modification date there, so you can see which side is newer before you
+  install. Look at the difference with `diff -r skills/<name> <destination>/skills/<name>`.
+- `EXTRA` — in the destination but not from this repo (a project's own agents, the board role files `bb-*`);
+  `install.sh` leaves it alone.
+- `WARN` — a destination skill carries an `evals/` folder; `install.sh` would remove that folder.
+
+`--rehearse` copies the destination's `agents/`, `commands/` and `skills/` into a temp dir, runs `install.sh` into
+that copy and prints the status before and after. The real destination is not written.
+
+State measured on 2026-10-03 (issue #6). Nobody has installed since; the gap is still open:
+
+| Destination | Result | Missing | Extra (not from this repo) |
+|---|---|---|---|
+| `hl_claw_bot/.claude` | `BEHIND missing=3 differs=0 same=9 extra=4` | skills `design-review`, `llmdoc`, `session-init` | agents `bb-bauer`, `bb-pruefer`, `bb-verifikation`; command `start-coding-session.md` |
+| `hl_game_backend/.claude` | `BEHIND missing=11 differs=0 same=1 extra=7` | everything except command `rescue-bot` | agents `bb-bauer`, `bb-pruefer`, `bb-verifikation`, `game-builder`, `game-designer`, `game-validator`, `isekai-storyteller` |
+
+`differs=0` in both: every copy that is installed is identical to this repo, so an install would only add files
+there and overwrite nothing with other content. Whether `hl_game_backend` should get the full set is an open
+decision of the repo owner (issue #6) — this README does not claim that any tool is left out on purpose.
+`hl_claw_bot/.claude/commands/start-coding-session.md` does not come from this repo (here `start-coding-session`
+is a skill); an install neither updates nor removes it.
 
 ---
 
@@ -246,7 +287,8 @@ What it checks:
 1. `bash -n` over `install.sh` and every `scripts/*.sh`
 2. `agents/*.md` and `skills/*/SKILL.md` carry YAML frontmatter with `name` + `description`; `commands/*.md` are non-empty
 3. `.claude/agents/*.md` pass `~/.claude/scripts/dev/agent-file-check.py` (skipped with a note when that store is absent)
-4. `install.sh` into a temp dir installs every agent, command and skill dir (counts match)
+4. `install.sh` into a temp dir installs every agent, command and skill dir (counts match), and the result is in
+   step with the source file by file (`scripts/install-status.sh`)
 5. `install.sh` has no default destination (read statically — the gate never runs it without a destination)
 6. This README lists every agent, command, skill and script — via `scripts/readme-listing-check.sh`
 
@@ -278,6 +320,10 @@ git push origin main
 # 3. Reinstall into each project that uses it (the destination is required)
 ./install.sh /home/rootvault/Dokumente/hl_claw_bot/.claude
 ./install.sh /home/rootvault/Dokumente/hl_game_backend/.claude
+
+# 4. Confirm each project is in step (read-only; last line "install-status: in step …", exit 0)
+scripts/install-status.sh /home/rootvault/Dokumente/hl_claw_bot/.claude
+scripts/install-status.sh /home/rootvault/Dokumente/hl_game_backend/.claude
 ```
 
 That's the full loop. Run `scripts/gate.sh` before step 2; a new skill, agent or command also needs its tree line
