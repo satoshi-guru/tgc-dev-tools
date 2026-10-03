@@ -264,24 +264,34 @@ So a new skill, agent or command needs a tree line **and** a `###` section here,
 
 ## Update Workflow
 
-When you improve a skill or agent:
+When you improve a skill or agent, the change reaches `main` through a branch, the gate and a pull request —
+never by a push to `main`:
 
 ```bash
-# 1. Edit the source file in tgc-dev-tools
+# 1. Start a branch from origin/main, then edit the source file in tgc-dev-tools
+git fetch origin
+git switch -c feat/gemini-review-pattern-n --no-track origin/main
 vim skills/gemini-review/SKILL.md
 
-# 2. Commit and push
+# 2. Gate, commit, push the branch, open a pull request against main
+scripts/gate.sh             # last line must be "gate: ok" (exit 0); fix and re-run on "gate: FAILED"
 git add skills/gemini-review/SKILL.md
 git commit -m "feat(gemini-review): add pattern N — <description>"
-git push origin main
+git push -u origin feat/gemini-review-pattern-n
+# PR body: what changed, the gate output, and "Closes #N" when there is an issue
+gh pr create --base main --head feat/gemini-review-pattern-n
 
-# 3. Reinstall into each project that uses it (the destination is required)
+# 3. After the pull request is merged: reinstall from the merged main into each project that uses it
+#    (the destination is required)
+git switch main && git pull --ff-only origin main
 ./install.sh /home/rootvault/Dokumente/hl_claw_bot/.claude
 ./install.sh /home/rootvault/Dokumente/hl_game_backend/.claude
 ```
 
-That's the full loop. Run `scripts/gate.sh` before step 2; a new skill, agent or command also needs its tree line
-and `###` section in this README (the gate checks it).
+That's the full loop. `main` changes only through a merged pull request: the branch is pushed, `main` is not, and
+a board lane (`.claude/agents/bb-*.md`) never merges its own pull request. Step 3 waits for the merge because an
+install from an unmerged branch puts files into the projects that `main` does not have. A new skill, agent or
+command also needs its tree line and `###` section in this README (the gate checks it).
 
 ---
 
