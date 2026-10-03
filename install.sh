@@ -11,8 +11,8 @@
 # <destination> is the .claude directory itself (it receives agents/, commands/, skills/).
 # Same-named files in the destination are overwritten. Both target repos list .claude/ in
 # their .gitignore, so the installed copies are untracked there; this repo is the versioned source.
-# ~/.claude as destination overwrites the global skills of the same name, which have drifted
-# from this repo (issue #3) - compare first.
+# ~/.claude as destination overwrites the four global skills of the same name (README, section
+# "Skills that also exist in ~/.claude/skills") - run scripts/skill-drift.sh and compare first.
 # Exit: 0 installed · 2 no destination given
 
 set -euo pipefail
