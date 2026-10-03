@@ -26,7 +26,9 @@ tgc-dev-tools/
 │   └── design-review/          # Design partner: design + pressure-test code BEFORE you build it
 ├── scripts/
 │   ├── gate.sh                 # Offline gate for this repo (not installed) — see "Gate"
-│   └── readme-listing-check.sh # Does this README list every agent, command, skill and script?
+│   ├── readme-listing-check.sh # Does this README list every agent, command, skill and script?
+│   ├── skill-drift.sh          # Do the skills here still match ~/.claude/skills? — see "Skills that also exist…"
+│   └── skill-drift-declared.txt # The deliberate differences skill-drift.sh accepts (one fork, one appendix)
 ├── .claude/agents/             # Board role files bb-* for this repo's own build lanes (not installed)
 └── install.sh                  # One-command install into a project's .claude (destination required)
 ```
@@ -69,10 +71,58 @@ Installing globally is possible, but read this first:
 ./install.sh ~/.claude
 ```
 
-`~/.claude/skills/` already holds skills of the same name that have **drifted** from this repo (tracked in
-issue #3; on 2026-10-03 the `SKILL.md` of `llmdoc`, `start-coding-session` and `session-init` differed from the
-global copies). A global install overwrites them with the versions from this repo, which are not always the
-newer ones. Compare before you run it.
+`~/.claude/skills/` already holds four skills of the same name (next section). A global install overwrites them
+with the versions from this repo. Since issue #3 that is harmless for `session-init` and `design-review`, but it
+would replace the generic `start-coding-session` template of every other project with the hl_claw_bot variant and
+append the superseded block to the global `llmdoc/PRESETS.md`. Run `scripts/skill-drift.sh` first and read what it
+lists.
+
+---
+
+## Skills that also exist in `~/.claude/skills`
+
+Four skills of this repo have a copy of the same name in the global store `~/.claude/skills/`. Claude Code resolves
+a name that exists at both levels to the **personal** copy ("enterprise overrides personal, and personal overrides
+project" — Claude Code docs, skills). On this machine a session therefore loads the global copy of these four, also
+inside a project that this repo was installed into; the copies here are the versioned record and what a machine
+without the global store gets.
+
+Which copy is canonical (decided in issue #3, measured on 2026-10-03):
+
+| Skill | Canonical copy | State of the copy in this repo | A change goes |
+|-------|----------------|--------------------------------|---------------|
+| `llmdoc` | `~/.claude/skills/llmdoc/` — newer (2026-09-10) and the only copy whose fetcher path exists (`llmdocs/crawler.py`; the old repo copy named `llmdocs.py`, which is gone) | `SKILL.md` identical. `PRESETS.md`: lines 1–29 are the global file byte for byte; below them the old repo-only tables are kept as a **superseded appendix**, not active | into the global copy first, then here by pull request |
+| `session-init` | `~/.claude/skills/session-init/` — newer (2026-09-17, adds the `context.py` shortcut) | identical | into the global copy first, then here by pull request |
+| `start-coding-session` | **Both, for different projects — never synced.** This repo: the hl_claw_bot variant. Global: the generic template for every other project | differs on purpose (78 vs 98 lines), declared as a fork | here for hl_claw_bot specifics; the global template is not this repo's business |
+| `design-review` | this repo — the versioned source; the global copy is an install of it | every shared file identical; `README.md` exists only here | here by pull request; the global copy is then updated by hand, never by a board lane |
+
+The other four skills (`git-check`, `gemini-review`, `port-feature`, `analyze-trade`) exist only here.
+
+Measure it — read-only, it never writes to the store or to this repo:
+
+```bash
+scripts/skill-drift.sh               # last line "skill-drift: in step same=1 extra=2 fork=1 only-here=4" (exit 0)
+scripts/skill-drift.sh llmdoc        # one skill only
+scripts/skill-drift.sh --selftest    # 10 cases on temp fixtures
+```
+
+- `SAME` every file identical · `EXTRA` everything the store holds is here verbatim, this repo has more ·
+  `FORK` differs and is declared · `DRIFT` differs and is **not** declared (exit 1) · `STALE` a declaration that no
+  longer holds (exit 1)
+- The deliberate differences are data, not memory: `scripts/skill-drift-declared.txt` holds one line per fork or
+  appendix with the reason. A new difference that is not declared there turns the readout red.
+- The readout is not part of `scripts/gate.sh`: the gate has to give the same answer on every machine and must
+  not turn red because a file in `~/.claude` changed. Run it when an item concerns one of the four skills and
+  before any global install.
+
+Known consequences, each with its own issue:
+
+- The hl_claw_bot variant of `start-coding-session` is shadowed by the global template of the same name, so
+  `/start-coding-session` inside `hl_claw_bot` loads the generic template. It needs its own name (issue #12).
+- Four preset groups of the old `PRESETS.md` (`hl_bot`, `x-promo`, `gaming-studio`, `happy-tool`) are not in the
+  canonical table and therefore not active (issue #13).
+- Pull request #1 (llmdoc sync from 2026-06-07) is superseded: it points the fetcher at
+  `Dokumente/llmdocs-publish/`, a directory that no longer exists.
 
 ---
 
@@ -135,11 +185,17 @@ Outputs: current phase, test count, then waits for the task.
 
 **When to use**: Start of every implementation session.
 
+**Canonical copy**: this is the hl_claw_bot variant and is kept that way; `~/.claude/skills/start-coding-session/`
+is a different skill under the same name (the generic template) and wins the name on this machine — see "Skills
+that also exist in `~/.claude/skills`" and issue #12.
+
 ---
 
 ### `/session-init`
 Starts a working session from the project's own config. User-invoked only (`disable-model-invocation: true`).
 
+- Shortcut first: when `~/.claude/scripts/dev/context.py` exists it runs that program, prints its output as the
+  brief and stops; the steps below are the fallback
 - Detects whether the cwd is a git worktree and shows branch + last 3 commits
 - Reads `.claude/session-init.yml` of the project (`required_reads`, `conditional_reads`, `buildlog_tail`,
   `test_cmd`, `health_checks`); without that file it falls back to `git status` + the tail of `CLAUDE.md`
@@ -150,8 +206,8 @@ Starts a working session from the project's own config. User-invoked only (`disa
 
 **When to use**: Start of a session in a project that carries a `.claude/session-init.yml`.
 
-**Drift**: the copy in `~/.claude/skills/session-init/` is newer (2026-09-17: it adds a shortcut through
-`~/.claude/scripts/dev/context.py`); the copy in this repo dates from 2026-06-05 and lacks it. Reconciling is issue #3.
+**Canonical copy**: `~/.claude/skills/session-init/`. The copy in this repo is identical to it since issue #3
+(before, it dated from 2026-06-05 and lacked the `context.py` shortcut of 2026-09-17).
 
 ---
 
@@ -164,16 +220,21 @@ Usage: `/analyze-trade <oid>` or `/analyze-trade BTC 14:30`
 ---
 
 ### `/llmdoc`
-Fetches the documentation of a library and saves it as LLM-ready markdown under `docs/<slug>/` of the current project.
+Fetches the documentation of a library and saves it as LLM-ready markdown in the global doc store
+`~/.llmdocs/docs/<slug>/`, shared by every repo — never into the `docs/` folder of the current project.
 
-- Argument: a known alias (`fastapi`, `hyperliquid`, `expo`, …), a raw URL, or `preset:<group>` — groups live in
-  `skills/llmdoc/PRESETS.md` and combine with `+` (`/llmdoc preset:hl_game`)
-- Chains `/doc-indexer` afterwards to build the token-cheap `COMPACT.md` layer
+- Argument: an engine preset (`discord`, `hyperliquid`, `hypedexer`, `openai`, `anthropic`), a known alias
+  (`fastapi`, `expo`, …), a raw URL, or `preset:<group>` — groups live in the table at the top of
+  `skills/llmdoc/PRESETS.md` and combine with `+` (`/llmdoc preset:hl_game`, `/llmdoc preset:hl_claw`)
+- Runs the fetcher `Dokumente/llmdocs/crawler.py` with `--archive-existing`, so a re-fetch keeps the old copy
+- Chains `/doc-indexer` afterwards to build the token-cheap `COMPACT.md` layer, then refreshes the store manifest
 
 **When to use**: Before writing config or code against an unfamiliar or recently changed library API, and right
 after a first install/build/run attempt fails.
 
-**Drift**: this copy differs from `~/.claude/skills/llmdoc/` (global copy from 2026-09-10); see issue #3 and PR #1.
+**Canonical copy**: `~/.claude/skills/llmdoc/` (2026-09-10). Since issue #3 `SKILL.md` here is identical to it,
+and `PRESETS.md` is the global file followed by a superseded appendix (the old repo-only tables — not active,
+issue #13). PR #1 is superseded by that sync.
 
 ---
 
@@ -196,6 +257,9 @@ I/O on the event loop, duplicate features. Output is a short doc saved to
 to pressure-test an approach (including a Gemini branch's architecture) before
 committing to it. It is the design counterpart to `/code-review` (which reviews an
 existing diff). See `skills/design-review/README.md` for the full guide.
+
+**Canonical copy**: this repo. `~/.claude/skills/design-review/` is identical in every shared file; the guide
+`README.md` exists only here.
 
 ---
 
@@ -259,6 +323,9 @@ scripts/readme-listing-check.sh --selftest
 ```
 
 So a new skill, agent or command needs a tree line **and** a `###` section here, or the gate is red.
+
+`scripts/skill-drift.sh` is deliberately **not** a gate check (it reads `~/.claude/skills`, which differs per
+machine and changes without a commit here); see "Skills that also exist in `~/.claude/skills`".
 
 ---
 

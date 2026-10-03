@@ -19,4 +19,19 @@ Output:  one "MISSING <kind>: <name>" or "STALE <kind>: <name>" line per gap, th
 Exit:    0 no gap · 1 gaps (or no README.md) · 2 usage
 ```
 
-_2 programs._
+## `skill-drift.sh`
+```
+skill-drift.sh — do the skills of this repo still match the copies of the same name in a skill store? Read-only.
+Usage:   scripts/skill-drift.sh [--store DIR] [--root ROOT] [--declared FILE] [NAME ...]
+         scripts/skill-drift.sh --selftest   # 10 cases on temp fixtures; ~/.claude is never read or written
+Options: --store DIR      skill store to compare against (default ~/.claude/skills)
+         --root ROOT      repo to read skills/ from (default: the repo this script lives in)
+         --declared FILE  the declarations file (default scripts/skill-drift-declared.txt); --forks is an alias
+         NAME ...         only these skills (default: every skill dir under skills/)
+Output:  the lines above, then the last line
+         "skill-drift: in step same=S extra=E fork=F only-here=K" or
+         "skill-drift: DRIFT drift=D stale=T same=S extra=E fork=F only-here=K"
+Exit:    0 no undeclared drift · 1 drift or a stale declaration · 2 usage / store or root is not a directory
+```
+
+_3 programs._

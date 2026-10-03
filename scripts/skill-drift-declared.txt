@@ -1,0 +1,16 @@
+# skill-drift-declared.txt — where a skill of this repo differs from ~/.claude/skills ON PURPOSE (decided in issue #3).
+# Read by scripts/skill-drift.sh. Everything not declared here must match the store, or the readout says DRIFT.
+#
+#   <name>                    the whole skill is a deliberate variant (FORK): never synced in either direction
+#   <name>/<file> +appendix   the file starts with the store's file byte for byte and keeps more lines below it
+#
+# A declaration that no longer holds is reported as STALE (exit 1) - then remove the line or fix the file.
+
+# hl_claw_bot variant (SESSION_STATE.md, CODEBASE_CLAUDE.md, CODING_CYCLE.md, pytest + ruff, deploy guardrails).
+# The store copy is the generic template for every other project (Node/pnpm, sprints/); it says itself that a
+# project-specific variant wins. Syncing either way would put the wrong stack into the other side's sessions.
+start-coding-session
+
+# Lines 1-29 are ~/.claude/skills/llmdoc/PRESETS.md verbatim (the active part). Below them this repo keeps its old
+# alias tables and group table as a superseded appendix, because content is never removed without a trace.
+llmdoc/PRESETS.md +appendix
