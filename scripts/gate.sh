@@ -11,8 +11,10 @@
 #      destination already had as it was (issue #8)
 #   5. install.sh has no default destination (static read of the file; the gate never runs it without one)
 #   6. README.md lists every agent, command, skill and script (scripts/readme-listing-check.sh; skipped without README.md)
+#   7. README.md carries no `git push` command whose target is main (issue #16; one FAIL per line, with its number;
+#      a quoted command counts too, the check cannot read a "never" in front of it; skipped without README.md)
 # Usage:  scripts/gate.sh            # run from anywhere; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 6 broken fixtures and pass on 3 good ones
+#          scripts/gate.sh --selftest # proves the checks fail on 8 broken fixtures and pass on 4 good ones (+ 23 line cases for check 7)
 set -uo pipefail
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
@@ -30,6 +32,44 @@ frontmatter_ok() {
     printf '%s\n' "$block" | grep -q "^${key}:" || return 1
   done
   return 0
+}
+
+# readme_push_main FILE — prints "LINE: text" for every line that carries a `git push` command whose pushed ref or
+# refspec target is the whole word main: origin main, -u origin main, HEAD:main, feat/x:main, +main, refs/heads/main,
+# :main, --delete main. Returns 0 when at least one such line exists, 1 when there is none.
+# How a line is read: words after "git push" up to the end of the command (&& || | ; a comment, or the backtick that
+# closes inline code); options are skipped; the first other word is the remote and is skipped too; of every further
+# word the part after the last ":" is the target. Not seen: a command wrapped over two lines, `git -C dir push`,
+# a push without a ref while main is checked out, --all / --mirror.
+readme_push_main() {
+  awk '
+    {
+      line = $0
+      gsub(/`/, " ` ", line)
+      n = split(line, tok, /[ \t]+/)
+      hit = 0
+      for (i = 1; i < n && !hit; i++) {
+        if (tok[i] !~ /(^|[^A-Za-z0-9_.\/-])git$/ || tok[i + 1] != "push") continue
+        pos = 0
+        for (j = i + 2; j <= n; j++) {
+          t = tok[j]
+          if (t == "&&" || t == "||" || t == "|" || t == ";" || t == "`" || t ~ /^#/) break
+          last = (t ~ /;$/)
+          gsub(/^["(]+|[.,:;!?)"]+$/, "", t)
+          if (t != "" && t !~ /^-/) {
+            pos++
+            if (pos > 1) {
+              sub(/^\+/, "", t); sub(/^.*:/, "", t); sub(/^refs\/heads\//, "", t)
+              if (t == "main") { hit = 1; break }
+            }
+          }
+          if (last) break
+        }
+      }
+      if (hit) { print NR ": " $0; found = 1 }
+    }
+    END { exit found ? 0 : 1 }
+  ' "$1"
 }
 
 run_checks() {
@@ -102,6 +142,14 @@ run_checks() {
       printf '%s\n' "$out"
     fi
   fi
+
+  # check 7: README.md must not instruct a git push whose target is main (issue #16)
+  if [ -f "$root/README.md" ]; then
+    while IFS= read -r out; do
+      [ -n "$out" ] || continue
+      fail "README.md:${out%%:*}: git push to main (issue #16: main changes only through a merged pull request):${out#*:}"
+    done < <(readme_push_main "$root/README.md")
+  fi
   [ "$FAILS" -eq 0 ]
 }
 
@@ -172,6 +220,60 @@ selftest() {
   cp -r "$t/good" "$t/drift"
   printf '# f\n\nnothing listed, install.sh\n' > "$t/drift/README.md"
   run_checks "$t/drift" >/dev/null && { echo "selftest FAIL: README drift accepted"; rc=1; }
+  # pushmain / pushrefspec / pushbranch: the listed fixture (check 6 green) plus a push instruction in its README, so
+  # only check 7 decides. The two rejected ones must name the line (the block starts at line 20, the command is 21).
+  local out line
+  cp -r "$t/listed" "$t/pushmain"
+  printf '\n```bash\ngit push origin main\n```\n' >> "$t/pushmain/README.md"
+  out="$(run_checks "$t/pushmain")"
+  case "$out" in
+    *"FAIL: README.md:21: git push to main"*) ;;
+    *) echo "selftest FAIL: README with 'git push origin main' accepted"; rc=1 ;;
+  esac
+  cp -r "$t/listed" "$t/pushrefspec"
+  printf '\n```bash\ngit push origin HEAD:main\n```\n' >> "$t/pushrefspec/README.md"
+  out="$(run_checks "$t/pushrefspec")"
+  case "$out" in
+    *"FAIL: README.md:21: git push to main"*) ;;
+    *) echo "selftest FAIL: README with 'git push origin HEAD:main' accepted"; rc=1 ;;
+  esac
+  cp -r "$t/listed" "$t/pushbranch"
+  printf '\nThe change reaches `main` through a pull request, never by a push to `main`:\n\n```bash\ngit push -u origin feat/x\n```\n' >> "$t/pushbranch/README.md"
+  run_checks "$t/pushbranch" >/dev/null || { echo "selftest FAIL: README with 'git push -u origin feat/x' rejected"; rc=1; }
+  # line cases for check 7, straight at readme_push_main: 11 lines it must report, 12 it must leave alone
+  while IFS= read -r line; do
+    printf '%s\n' "$line" > "$t/line.md"
+    readme_push_main "$t/line.md" >/dev/null || { echo "selftest FAIL: push to main not seen: $line"; rc=1; }
+  done <<'EOF'
+git push origin main
+git push -u origin main
+git push origin HEAD:main
+git push origin feat/x:main
+git push --force origin +main
+git push origin refs/heads/main
+git push origin :main
+git push origin --delete main
+git push origin feat/x main
+git fetch origin && git push origin main
+Then run `git push origin main`.
+EOF
+  while IFS= read -r line; do
+    printf '%s\n' "$line" > "$t/line.md"
+    readme_push_main "$t/line.md" >/dev/null && { echo "selftest FAIL: no push to main, but reported: $line"; rc=1; }
+  done <<'EOF'
+git push -u origin feat/x
+git push origin maintenance
+git push origin feat/main-menu
+git push origin main:feat/x
+git push main feat/x
+git push origin feat/x && git switch main
+git push origin feat/x; git switch main
+git push origin feat/x # then a pull request against main
+git switch main && git pull --ff-only origin main
+never by a push to `main`
+`git push` the branch, then open a pull request against main
+`main` changes only through a merged pull request: the branch is pushed, `main` is not
+EOF
   rm -rf "$t"
   [ "$rc" -eq 0 ] && echo "selftest ok"
   return "$rc"
