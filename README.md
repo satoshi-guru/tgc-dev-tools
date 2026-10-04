@@ -313,6 +313,11 @@ What it checks:
 4. `install.sh` into a temp dir installs every agent, command and skill dir (counts match)
 5. `install.sh` has no default destination (read statically — the gate never runs it without a destination)
 6. This README lists every agent, command, skill and script — via `scripts/readme-listing-check.sh`
+7. This README carries no `git push` command whose target is `main` (issue #16) — one `FAIL: README.md:<line>: …`
+   per offending line. Rejected: the pushed ref or the refspec target is the whole word `main` (`origin main`,
+   `-u origin main`, `HEAD:main`, `feat/x:main`). Accepted: a push of a branch (`git push -u origin feat/x`, also
+   `maintenance` or `feat/main-menu`) and prose without the command. The check reads the command, not the sentence
+   around it: a quoted push to `main` is rejected even after a "never", so describe the rule in words instead
 
 `scripts/readme-listing-check.sh` can be run on its own. It compares the tree in "What's Inside" and the `###`
 headings with `agents/`, `commands/`, `skills/` on disk, in both directions:
