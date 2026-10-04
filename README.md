@@ -61,6 +61,8 @@ What the install does:
 
 - The destination is the `.claude` directory itself; it receives `agents/`, `commands/` and `skills/`.
 - Files of the same name in the destination are **overwritten**; a skill's `evals/` folder is not installed.
+- Nothing in the destination is removed. An `evals/` folder that a skill in the destination already has is left
+  untouched (until issue #8 the install deleted it).
 - `hl_claw_bot` and `hl_game_backend` both list `.claude/` in their `.gitignore`. Installed copies are therefore
   untracked there: they do not show up in `git status`, are not part of a clone, and every checkout or worktree
   of those repos needs its own install. This repo is the only versioned source — edit here, then reinstall.
@@ -310,7 +312,8 @@ What it checks:
 1. `bash -n` over `install.sh` and every `scripts/*.sh`
 2. `agents/*.md` and `skills/*/SKILL.md` carry YAML frontmatter with `name` + `description`; `commands/*.md` are non-empty
 3. `.claude/agents/*.md` pass `~/.claude/scripts/dev/agent-file-check.py` (skipped with a note when that store is absent)
-4. `install.sh` into a temp dir installs every agent, command and skill dir (counts match)
+4. `install.sh` into a temp dir installs every agent, command and skill dir (counts match), copies every entry of
+   a skill (hidden ones too) except its `evals/`, and leaves an `evals/` folder the destination already had as it was
 5. `install.sh` has no default destination (read statically — the gate never runs it without a destination)
 6. This README lists every agent, command, skill and script — via `scripts/readme-listing-check.sh`
 

@@ -6,11 +6,13 @@
 #   2. agents/*.md and skills/*/SKILL.md carry YAML frontmatter with name + description;
 #      commands/*.md are non-empty
 #   3. .claude/agents/*.md pass ~/.claude/scripts/dev/agent-file-check.py (skipped with a note if the store is absent)
-#   4. install.sh into a temp dir installs every agent, command and skill dir of this repo (counts match)
+#   4. install.sh into a temp dir installs every agent, command and skill dir of this repo (counts match),
+#      copies every entry of a skill (hidden ones too) except its evals/, and leaves an evals/ folder that a
+#      destination already had as it was (issue #8)
 #   5. install.sh has no default destination (static read of the file; the gate never runs it without one)
 #   6. README.md lists every agent, command, skill and script (scripts/readme-listing-check.sh; skipped without README.md)
 # Usage:  scripts/gate.sh            # run from anywhere; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 3 broken fixtures and pass on 2 good ones
+#          scripts/gate.sh --selftest # proves the checks fail on 6 broken fixtures and pass on 3 good ones
 set -uo pipefail
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
@@ -65,6 +67,23 @@ run_checks() {
       w="$(find "$root/agents" -maxdepth 1 -name '*.md' | wc -l)/$(find "$root/commands" -maxdepth 1 -name '*.md' | wc -l)/$(find "$root/skills" -mindepth 1 -maxdepth 1 -type d | wc -l)"
       g="$(find "$tmp/dest/agents" -maxdepth 1 -name '*.md' | wc -l)/$(find "$tmp/dest/commands" -maxdepth 1 -name '*.md' | wc -l)/$(find "$tmp/dest/skills" -mindepth 1 -maxdepth 1 -type d | wc -l)"
       [ "$w" = "$g" ] || fail "install.sh counts agents/commands/skills want $w got $g"
+      # issue #8 — what the counts do not see. Fresh destination: every entry of a skill arrives (hidden ones
+      # too) except its evals/. Destination that already holds skills/<name>/evals/own.json for every skill:
+      # after the install each own.json is still there and nothing was added next to it.
+      local n own all
+      diff -r -x evals "$root/skills" "$tmp/dest/skills" >/dev/null 2>&1 || fail "install.sh did not copy every entry of every skill (evals/ aside, hidden entries included)"
+      [ -z "$(find "$tmp/dest/skills" -mindepth 2 -maxdepth 2 -name evals)" ] || fail "install.sh installed a skill's evals/ folder (evals are not installed)"
+      for f in "$root"/skills/*/; do
+        [ -d "$f" ] || continue
+        mkdir -p "$tmp/kept/skills/$(basename "$f")/evals"
+        printf 'own\n' > "$tmp/kept/skills/$(basename "$f")/evals/own.json"
+      done
+      bash "$root/install.sh" "$tmp/kept" >/dev/null 2>&1 || fail "install.sh into a destination that already has evals/ folders"
+      n="$(find "$root/skills" -mindepth 1 -maxdepth 1 -type d | wc -l)"
+      own="$(find "$tmp/kept/skills" -mindepth 3 -maxdepth 3 -path '*/evals/own.json' | wc -l)"
+      all="$(find "$tmp/kept/skills" -mindepth 3 -maxdepth 3 -path '*/evals/*' | wc -l)"
+      [ "$own" = "$n" ] || fail "install.sh removed an evals/ folder the destination already had (issue #8): $own of $n own.json left"
+      [ "$all" = "$own" ] || fail "install.sh wrote into an evals/ folder the destination already had (issue #8): $all entries, $own of them own.json"
     else
       fail "install.sh into temp dir"
     fi
@@ -86,6 +105,24 @@ run_checks() {
   [ "$FAILS" -eq 0 ]
 }
 
+# fixture_installer FILE SKILL_COPY — writes a minimal installer for the selftest whose skills loop runs
+# SKILL_COPY; in it $d is the skill's source dir (with trailing slash) and $o the skill's destination dir
+fixture_installer() {
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'DEST="$1"' \
+    'S="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' \
+    'mkdir -p "$DEST/agents" "$DEST/commands" "$DEST/skills"' \
+    'cp "$S"/agents/*.md "$DEST/agents/"' \
+    'cp "$S"/commands/*.md "$DEST/commands/"' \
+    'for d in "$S"/skills/*/; do' \
+    '  o="$DEST/skills/$(basename "$d")"' \
+    '  mkdir -p "$o"' \
+    "  $2" \
+    'done' > "$1"
+}
+
 selftest() {
   local t rc=0
   t="$(mktemp -d)"
@@ -102,6 +139,32 @@ selftest() {
   cp -r "$t/good" "$t/default"
   printf 'DEST="${1:-/nonexistent/.claude}"\n' >> "$t/default/install.sh"
   run_checks "$t/default" >/dev/null && { echo "selftest FAIL: default destination accepted"; rc=1; }
+  # withevals: good fixture whose skill carries evals/ and a hidden entry -> accepted; a fresh install of it has
+  # the hidden entry and no evals/ (check 4, issue #8)
+  local out
+  cp -r "$t/good" "$t/withevals"
+  mkdir -p "$t/withevals/skills/x/evals"
+  printf '{}\n' > "$t/withevals/skills/x/evals/evals.json"
+  printf 'keep\n' > "$t/withevals/skills/x/.keep"
+  run_checks "$t/withevals" >/dev/null || { echo "selftest FAIL: fixture with evals/ and a hidden entry rejected"; rc=1; }
+  bash "$t/withevals/install.sh" "$t/withevals-dest" >/dev/null 2>&1
+  [ -f "$t/withevals-dest/skills/x/.keep" ] || { echo "selftest FAIL: hidden entry of a skill not installed"; rc=1; }
+  [ ! -e "$t/withevals-dest/skills/x/evals" ] || { echo "selftest FAIL: evals/ of a skill installed"; rc=1; }
+  # evalsrm / evalscopied / nohidden: the same fixture with an installer that (a) copies the whole skill dir and
+  # then removes evals/ in the destination - the behaviour before issue #8, (b) copies evals/ along, (c) skips
+  # evals/ but drops hidden entries -> each rejected, and for its own reason (check 4)
+  cp -r "$t/withevals" "$t/evalsrm"
+  fixture_installer "$t/evalsrm/install.sh" 'cp -r "$d." "$o/"; rm -rf "$o/evals"'
+  out="$(run_checks "$t/evalsrm" 2>&1)" && { echo "selftest FAIL: installer that removes the destination's evals/ accepted"; rc=1; }
+  printf '%s\n' "$out" | grep -q 'removed an evals/ folder the destination already had (issue #8)' || { echo "selftest FAIL: evalsrm not rejected for the removed evals/"; rc=1; }
+  cp -r "$t/withevals" "$t/evalscopied"
+  fixture_installer "$t/evalscopied/install.sh" 'cp -r "$d." "$o/"'
+  out="$(run_checks "$t/evalscopied" 2>&1)" && { echo "selftest FAIL: installer that installs evals/ accepted"; rc=1; }
+  printf '%s\n' "$out" | grep -q "installed a skill's evals/ folder" || { echo "selftest FAIL: evalscopied not rejected for the installed evals/"; rc=1; }
+  cp -r "$t/withevals" "$t/nohidden"
+  fixture_installer "$t/nohidden/install.sh" 'for e in "$d"*; do [ "$(basename "$e")" = evals ] || cp -r "$e" "$o/"; done'
+  out="$(run_checks "$t/nohidden" 2>&1)" && { echo "selftest FAIL: installer that drops hidden entries accepted"; rc=1; }
+  printf '%s\n' "$out" | grep -q 'did not copy every entry of every skill' || { echo "selftest FAIL: nohidden not rejected for the missing hidden entry"; rc=1; }
   # listed / drift: good fixture with a README that names everything -> accepted, one that names nothing -> rejected (check 6)
   cp -r "$t/good" "$t/listed"
   printf '# f\n\n```\nf/\n├── agents/\n│   └── a.md\n├── commands/\n│   └── c.md\n├── skills/\n│   └── x/\n└── install.sh\n```\n\n### `a`\n\n### `/c`\n\n### `/x`\n' > "$t/listed/README.md"
