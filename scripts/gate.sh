@@ -11,10 +11,13 @@
 #      destination already had as it was (issue #8)
 #   5. install.sh has no default destination (static read of the file; the gate never runs it without one)
 #   6. README.md lists every agent, command, skill and script (scripts/readme-listing-check.sh; skipped without README.md)
-#   7. README.md carries no `git push` command whose target is main (issue #16; one FAIL per line, with its number;
-#      a quoted command counts too, the check cannot read a "never" in front of it; skipped without README.md)
+#   7. README.md carries no `git push` command whose target is main (issue #16; one FAIL per command line, with the
+#      number of the line where the command starts; a quoted command counts too, the check cannot read a "never" in
+#      front of it; skipped without README.md). Since issue #18 also: a command wrapped with a backslash, options
+#      between git and push (git -C dir push ...), --all / --mirror / --branches, and a push without a ref after a
+#      switch or checkout to main in the same code block
 # Usage:  scripts/gate.sh            # run from anywhere; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 8 broken fixtures and pass on 4 good ones (+ 23 line cases for check 7)
+#          scripts/gate.sh --selftest # proves the checks fail on 10 broken fixtures and pass on 5 good ones (+ 23 line cases and 53 block cases for check 7)
 set -uo pipefail
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
@@ -39,36 +42,100 @@ frontmatter_ok() {
 # :main, --delete main. Returns 0 when at least one such line exists, 1 when there is none.
 # How a line is read: words after "git push" up to the end of the command (&& || | ; a comment, or the backtick that
 # closes inline code); options are skipped; the first other word is the remote and is skipped too; of every further
-# word the part after the last ":" is the target. Not seen: a command wrapped over two lines, `git -C dir push`,
-# a push without a ref while main is checked out, --all / --mirror.
+# word the part after the last ":" is the target.
+# Also reported since issue #18 (the number is the line where the command starts, the text is the joined command):
+#   - a wrapped command: a line that ends in a backslash is joined with the next one before the words are split
+#     (not across a code fence)
+#   - options between git and push: every -word is skipped, and with -C -c --git-dir --work-tree --namespace
+#     --config-env the word after it as well (git -C dir push origin main)
+#   - --all, --mirror, --branches (the newer name of --all), whatever the remote: they push main without naming it
+#   - a push without a ref while main is checked out: after `git switch main` / `git checkout main` (also -c / -b /
+#     -C / -B with the new name main) a `git push` with no ref word (nothing, or only the remote), or with the ref
+#     HEAD / @, is reported. The state lives inside one fenced code block (``` or ~~~) and ends with it; outside a
+#     fence it lives for one line. A switch or checkout to another branch, a new branch or --detach clears it;
+#     `git checkout -- path` leaves it. `git push --tags` without a ref pushes tags only and is left alone; the word
+#     after -o / --push-option / --receive-pack / --exec is an option value, not the remote.
+# Still not seen: a branch change by other means (git switch --track origin/main, git branch -M main, git clone,
+# git worktree, cd into another clone), `git checkout <path>` without "--" (read as a branch, clears the state),
+# state carried from one code block to the next, a push configured elsewhere (push.default, remote.*.push, an
+# alias), and prose: the check reads commands, not sentences.
 readme_push_main() {
   awk '
-    {
-      line = $0
-      gsub(/`/, " ` ", line)
-      n = split(line, tok, /[ \t]+/)
-      hit = 0
-      for (i = 1; i < n && !hit; i++) {
-        if (tok[i] !~ /(^|[^A-Za-z0-9_.\/-])git$/ || tok[i + 1] != "push") continue
-        pos = 0
-        for (j = i + 2; j <= n; j++) {
-          t = tok[j]
-          if (t == "&&" || t == "||" || t == "|" || t == ";" || t == "`" || t ~ /^#/) break
-          last = (t ~ /;$/)
-          gsub(/^["(]+|[.,:;!?)"]+$/, "", t)
-          if (t != "" && t !~ /^-/) {
-            pos++
-            if (pos > 1) {
-              sub(/^\+/, "", t); sub(/^.*:/, "", t); sub(/^refs\/heads\//, "", t)
-              if (t == "main") { hit = 1; break }
-            }
+    function issep(t) { return (t == "&&" || t == "||" || t == "|" || t == ";" || t == "`" || t ~ /^#/) }
+    function bare(t) { gsub(/^["(]+|[.,:;!?)"]+$/, "", t); return t }
+    { L[NR] = $0 }
+    END {
+      fence = 0; onmain = 0; found = 0
+      for (r = 1; r <= NR; r = nx) {
+        # one logical line: the physical lines r .. nx-1, joined where a line ends in a backslash
+        n = 0; text = ""; nx = r
+        do {
+          s = L[nx]; cont = 0
+          if (s ~ /\\$/ && nx < NR && L[nx + 1] !~ /^[ \t]*(```|~~~)/) {
+            cont = 1; sub(/[ \t]*\\$/, "", s)
           }
-          if (last) break
+          if (nx > r) sub(/^[ \t]+/, "", s)
+          text = (nx == r) ? s : text " " s
+          gsub(/`/, " ` ", s); gsub(/;/, " ; ", s)
+          m = split(s, w, /[ \t]+/)
+          for (k = 1; k <= m; k++) if (w[k] != "") { tok[++n] = w[k]; tl[n] = nx }
+          nx++
+        } while (cont)
+        if (L[r] ~ /^[ \t]*(```|~~~)/) { fence = !fence; onmain = 0 }
+        else if (!fence) onmain = 0
+        hit = 0
+        for (i = 1; i < n && !hit; i++) {
+          if (tok[i] !~ /(^|[^A-Za-z0-9_.\/-])git$/) continue
+          k = i + 1
+          while (k <= n && tok[k] ~ /^-/) {
+            k += (tok[k] ~ /^(-C|-c|--git-dir|--work-tree|--namespace|--config-env)$/) ? 2 : 1
+          }
+          if (k > n) continue
+          cmd = tok[k]; ended = 0
+          # "push." / "push)" in a sentence or a subshell: the command ends at the word itself
+          if (cmd ~ /^(push|switch|checkout)[.,:;!?)"]+$/) { ended = 1; cmd = bare(cmd) }
+          if (cmd == "push") {
+            pos = 0; tags = 0
+            for (j = k + 1; j <= n && !ended && !hit; j++) {
+              t = tok[j]
+              if (issep(t)) break
+              t = bare(t)
+              if (t == "") continue
+              if (t ~ /^-/) {
+                if (t == "--all" || t == "--mirror" || t == "--branches") hit = 1
+                else if (t == "--tags") tags = 1
+                else if (t ~ /^(-o|--push-option|--receive-pack|--exec)$/ && j < n && !issep(tok[j + 1])) j++
+                continue
+              }
+              pos++
+              if (pos > 1) {
+                sub(/^\+/, "", t)
+                head = (t == "HEAD" || t == "@")
+                sub(/^.*:/, "", t); sub(/^refs\/heads\//, "", t)
+                if (t == "main" || (onmain && head)) hit = 1
+              }
+            }
+            if (!hit && onmain && pos <= 1 && !tags) hit = 1
+            if (hit) at = tl[i]
+          } else if (cmd == "switch" || cmd == "checkout") {
+            first = ""; paths = 0; detach = 0
+            for (j = k + 1; j <= n && !ended; j++) {
+              t = tok[j]
+              if (issep(t)) break
+              t = bare(t)
+              if (t == "") continue
+              if (t == "--") { paths = 1; break }
+              if (t ~ /^-./) { if (t == "--detach" || t == "-d") detach = 1; continue }
+              if (first == "") first = t
+            }
+            if (detach) onmain = 0
+            else if (!paths && first != "") onmain = (first == "main")
+          }
         }
+        if (hit) { print at ": " text; found = 1 }
       }
-      if (hit) { print NR ": " $0; found = 1 }
+      exit found ? 0 : 1
     }
-    END { exit found ? 0 : 1 }
   ' "$1"
 }
 
@@ -169,6 +236,24 @@ fixture_installer() {
     '  mkdir -p "$o"' \
     "  $2" \
     'done' > "$1"
+}
+
+# push_block WANT LINE... — selftest helper for check 7 (issue #18): writes the LINEs into a fixture of its own and
+# compares the line numbers readme_push_main reports with WANT ("" = nothing reported, "3" = line 3, "3 4" = both).
+# Prints the fixture and returns 1 on a difference.
+push_block() {
+  local want="$1" got="" out f
+  shift
+  f="$(mktemp)"
+  printf '%s\n' "$@" > "$f"
+  while IFS= read -r out; do
+    got="$got${got:+ }${out%%:*}"
+  done < <(readme_push_main "$f")
+  rm -f "$f"
+  [ "$got" = "$want" ] && return 0
+  echo "selftest FAIL: check 7 block case, reported line(s) want '$want' got '$got':"
+  printf '    | %s\n' "$@"
+  return 1
 }
 
 selftest() {
@@ -274,6 +359,86 @@ never by a push to `main`
 `git push` the branch, then open a pull request against main
 `main` changes only through a merged pull request: the branch is pushed, `main` is not
 EOF
+  # block cases for check 7 (issue #18), straight at readme_push_main through push_block: the first argument is the
+  # line number(s) that must be reported ('' = nothing), the rest are the lines of the fixture. F is a code fence.
+  local F='```'
+  # form 1 — a command wrapped with a backslash: 4 reported (at the line where the command starts), 4 left alone
+  push_block 1 'git push origin \' '  main' || rc=1
+  push_block 1 'git push \' '  -u origin \' '  HEAD:main' || rc=1
+  push_block 2 'git fetch origin && \' '  git push origin main' || rc=1
+  push_block 3 'git push -u origin \' '  feat/x' 'git push origin main' || rc=1
+  push_block '' 'git push -u origin \' '  feat/x' || rc=1
+  push_block '' 'git push -u origin feat/x \' '  && git switch main' || rc=1
+  push_block '' 'git push -u \' '  origin \' '  main:feat/x' || rc=1
+  push_block '' "$F" 'git switch main \' "$F" 'git push' || rc=1
+  # form 2 — options between git and push: 4 reported, 4 left alone
+  push_block 1 'git -C ../x push origin main' || rc=1
+  push_block 1 'git -c a=b push origin HEAD:main' || rc=1
+  push_block 1 'git --git-dir ../x/.git --work-tree=../x push origin main' || rc=1
+  push_block 1 'Then run `git --no-pager push -u origin main`.' || rc=1
+  push_block '' 'git -C ../x push -u origin feat/x' || rc=1
+  push_block '' 'git -C ../x pull origin main' || rc=1
+  push_block '' 'git -C main push origin feat/x' || rc=1
+  push_block '' 'git -C push pull origin main' || rc=1
+  # form 3 — --all / --mirror (and --branches, the newer name of --all): 5 reported, 6 left alone
+  push_block 1 'git push --all' || rc=1
+  push_block 1 'git push origin --mirror' || rc=1
+  push_block 1 'git push --all origin' || rc=1
+  push_block 1 'git push --branches origin' || rc=1
+  push_block 1 'Then run `git push --all`.' || rc=1
+  push_block '' 'git push --tags origin feat/x' || rc=1
+  push_block '' 'git push --force-with-lease origin feat/x' || rc=1
+  push_block '' 'git fetch --all' || rc=1
+  push_block '' 'git fetch --all && git push -u origin feat/x' || rc=1
+  push_block '' 'git push origin feat/all' || rc=1
+  push_block '' 'git push origin feat/x # --all and --mirror are rejected' || rc=1
+  # form 4 — a push without a ref while main is checked out, inside one code block: 12 reported, 14 left alone
+  push_block 3 "$F" 'git switch main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout main' 'git push origin' "$F" || rc=1
+  push_block 3 "$F" 'git switch main && git pull --ff-only origin main' 'git push' "$F" || rc=1
+  push_block 2 "$F" 'git switch main && git push' "$F" || rc=1
+  push_block 1 'git checkout main && git push origin' || rc=1
+  push_block 2 "$F" '(git switch main && git push)' "$F" || rc=1
+  push_block '3 4' "$F" 'git switch main' 'git push' 'git push origin' "$F" || rc=1
+  push_block 3 "$F" 'git switch main' 'git push -u origin HEAD' "$F" || rc=1
+  push_block 3 "$F" 'git switch main' 'git push --force-with-lease' "$F" || rc=1
+  push_block 3 "$F" 'git switch main' 'git push -o ci.skip origin' "$F" || rc=1
+  push_block 3 "$F" 'git checkout -B main origin/main' 'git push' "$F" || rc=1
+  push_block 4 "$F" 'git switch main' 'git checkout -- README.md' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch -c feat/x --no-track origin/main' 'git push -u origin feat/x' "$F" || rc=1
+  push_block '' "$F" 'git switch main && git pull --ff-only origin main' './install.sh /tmp/a/.claude' './install.sh /tmp/b/.claude' "$F" || rc=1
+  push_block '' "$F" 'git add README.md' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git switch feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git switch -c feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git checkout main' 'git checkout -b feat/x' 'git push origin' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git switch --detach origin/main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch main' "$F" '' "$F" 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git push -u origin feat/x' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git push origin HEAD:feat/x' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git push -o ci.skip origin feat/x' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git push origin --tags' "$F" || rc=1
+  push_block '' "$F" 'git switch maintenance' 'git push' "$F" || rc=1
+  push_block '' 'After `git switch main` the install runs.' 'Then `git push` the branch.' || rc=1
+  # pushwrapped / pushonmain / pushflow: the same through run_checks, like pushmain above (block at line 20). The
+  # wrapped command is named at the line where it starts (21), the push without a ref at its own line (22); the
+  # step-3 block of the real README (switch to main, pull, install) stays accepted.
+  cp -r "$t/listed" "$t/pushwrapped"
+  printf '\n```bash\ngit push origin \\\n  main\n```\n' >> "$t/pushwrapped/README.md"
+  out="$(run_checks "$t/pushwrapped")"
+  case "$out" in
+    *"FAIL: README.md:21: git push to main"*) ;;
+    *) echo "selftest FAIL: README with a wrapped 'git push origin main' accepted"; rc=1 ;;
+  esac
+  cp -r "$t/listed" "$t/pushonmain"
+  printf '\n```bash\ngit switch main\ngit push\n```\n' >> "$t/pushonmain/README.md"
+  out="$(run_checks "$t/pushonmain")"
+  case "$out" in
+    *"FAIL: README.md:22: git push to main"*) ;;
+    *) echo "selftest FAIL: README with 'git switch main' + 'git push' in one block accepted"; rc=1 ;;
+  esac
+  cp -r "$t/listed" "$t/pushflow"
+  printf '\n```bash\ngit switch main && git pull --ff-only origin main\n./install.sh /tmp/x/.claude\n```\n' >> "$t/pushflow/README.md"
+  run_checks "$t/pushflow" >/dev/null || { echo "selftest FAIL: README with 'git switch main && git pull' + install rejected"; rc=1; }
   rm -rf "$t"
   [ "$rc" -eq 0 ] && echo "selftest ok"
   return "$rc"

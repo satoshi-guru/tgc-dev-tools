@@ -316,11 +316,16 @@ What it checks:
    a skill (hidden ones too) except its `evals/`, and leaves an `evals/` folder the destination already had as it was
 5. `install.sh` has no default destination (read statically — the gate never runs it without a destination)
 6. This README lists every agent, command, skill and script — via `scripts/readme-listing-check.sh`
-7. This README carries no `git push` command whose target is `main` (issue #16) — one `FAIL: README.md:<line>: …`
-   per offending line. Rejected: the pushed ref or the refspec target is the whole word `main` (`origin main`,
-   `-u origin main`, `HEAD:main`, `feat/x:main`). Accepted: a push of a branch (`git push -u origin feat/x`, also
-   `maintenance` or `feat/main-menu`) and prose without the command. The check reads the command, not the sentence
-   around it: a quoted push to `main` is rejected even after a "never", so describe the rule in words instead
+7. This README carries no `git push` command whose target is `main` (issues #16, #18) — one
+   `FAIL: README.md:<line>: …` per offending command, at the line where it starts. Rejected: the pushed ref or the
+   refspec target is the whole word `main` (`origin main`, `-u origin main`, `HEAD:main`, `feat/x:main`), also when
+   the command is wrapped with a backslash or carries options between `git` and `push` (`-C dir`, `-c k=v`);
+   the options `--all`, `--mirror` and `--branches`, whatever the remote; and, inside one code block, a push
+   without a ref (or of `HEAD`) after a switch or checkout to `main`. Accepted: a push of a branch
+   (`git push -u origin feat/x`, also `maintenance` or `feat/main-menu`), a switch to `main` that is followed by a
+   pull and no push (step 3 of "Update Workflow"), and prose without the command. The check reads the command, not
+   the sentence around it: a quoted push to `main` is rejected even after a "never", so describe the rule in words
+   instead. What it still does not see is listed in the comment above `readme_push_main` in `scripts/gate.sh`
 
 `scripts/readme-listing-check.sh` can be run on its own. It compares the tree in "What's Inside" and the `###`
 headings with `agents/`, `commands/`, `skills/` on disk, in both directions:
