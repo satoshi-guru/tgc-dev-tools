@@ -19,7 +19,7 @@
 #      between git and push (git -C dir push ...), --all / --mirror / --branches, and a push without a ref after a
 #      switch or checkout to main in the same code block
 # Usage:  scripts/gate.sh            # run from anywhere; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 11 broken fixtures and pass on 6 good ones (+ 23 line cases and 53 block cases for check 7)
+#          scripts/gate.sh --selftest # proves the checks fail on 12 broken fixtures and pass on 7 good ones (+ 29 line cases and 86 block cases for check 7)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 set -uo pipefail
 
@@ -332,7 +332,10 @@ selftest() {
   cp -r "$t/listed" "$t/pushbranch"
   printf '\nThe change reaches `main` through a pull request, never by a push to `main`:\n\n```bash\ngit push -u origin feat/x\n```\n' >> "$t/pushbranch/README.md"
   run_checks "$t/pushbranch" >/dev/null || { echo "selftest FAIL: README with 'git push -u origin feat/x' rejected"; rc=1; }
-  # line cases for check 7, straight at readme_push_main: 11 lines it must report, 12 it must leave alone
+  # line cases for check 7, straight at readme_push_main: 14 lines it must report, 15 it must leave alone. Since
+  # issue #30 each list has one line that calls git by its path, one with the ref in single quotes and one that ends
+  # in a carriage return (a file saved with CRLF line endings). A here-document line cannot carry a carriage return,
+  # so that pair is written with printf right below its list.
   while IFS= read -r line; do
     printf '%s\n' "$line" > "$t/line.md"
     readme_push_main "$t/line.md" >/dev/null || { echo "selftest FAIL: push to main not seen: $line"; rc=1; }
@@ -348,7 +351,11 @@ git push origin --delete main
 git push origin feat/x main
 git fetch origin && git push origin main
 Then run `git push origin main`.
+/usr/bin/git push origin main
+git push origin 'main'
 EOF
+  printf 'git push origin main\r\n' > "$t/line.md"
+  readme_push_main "$t/line.md" >/dev/null || { echo "selftest FAIL: push to main not seen: git push origin main + carriage return"; rc=1; }
   while IFS= read -r line; do
     printf '%s\n' "$line" > "$t/line.md"
     readme_push_main "$t/line.md" >/dev/null && { echo "selftest FAIL: no push to main, but reported: $line"; rc=1; }
@@ -365,7 +372,11 @@ git switch main && git pull --ff-only origin main
 never by a push to `main`
 `git push` the branch, then open a pull request against main
 `main` changes only through a merged pull request: the branch is pushed, `main` is not
+/usr/bin/git push origin feat/x
+git push origin 'feat/x'
 EOF
+  printf 'git push origin feat/x\r\n' > "$t/line.md"
+  readme_push_main "$t/line.md" >/dev/null && { echo "selftest FAIL: no push to main, but reported: git push origin feat/x + carriage return"; rc=1; }
   # block cases for check 7 (issue #18), straight at readme_push_main through push_block: the first argument is the
   # line number(s) that must be reported ('' = nothing), the rest are the lines of the fixture. F is a code fence.
   local F='```'
@@ -426,6 +437,49 @@ EOF
   push_block '' "$F" 'git switch main' 'git push origin --tags' "$F" || rc=1
   push_block '' "$F" 'git switch maintenance' 'git push' "$F" || rc=1
   push_block '' 'After `git switch main` the install runs.' 'Then `git push` the branch.' || rc=1
+  # block cases for check 7 (issue #30), three more forms. R is a carriage return, FR a code fence that ends in one.
+  local R=$'\r' FR
+  FR="$F$R"
+  # form 5 — git called by its path (a command word that ends in /git): 5 reported, 7 left alone. A word that only
+  # ends in the letters git (legit, my-git, .git) is still no command, and a path that ends in /git is one only when
+  # the word after it (options aside) is push, switch or checkout.
+  push_block 1 '/usr/bin/git push origin main' || rc=1
+  push_block 1 './git push -u origin HEAD:main' || rc=1
+  push_block 1 '(/usr/bin/git -C ../x push origin main)' || rc=1
+  push_block 1 'Then run `/usr/local/bin/git push --all`.' || rc=1
+  push_block 3 "$F" '/usr/bin/git switch main' '/usr/bin/git push' "$F" || rc=1
+  push_block '' '/usr/bin/git push -u origin feat/x' || rc=1
+  push_block '' '/usr/bin/git pull origin main' || rc=1
+  push_block '' 'git clone https://example.org/git main' || rc=1
+  push_block '' 'git -C ../git push origin feat/x' || rc=1
+  push_block '' 'git push origin feat/git' || rc=1
+  push_block '' 'legit push origin main' || rc=1
+  push_block '' './my-git push origin main' || rc=1
+  # form 6 — single quotes around the ref or around the whole command: 5 reported, 5 left alone
+  push_block 1 "git push origin 'main'" || rc=1
+  push_block 1 "git push origin 'HEAD:main'" || rc=1
+  push_block 1 "sh -c 'git push origin main'" || rc=1
+  push_block 1 "sh -c 'git switch main && git push'" || rc=1
+  push_block 3 "$F" "git switch 'main'" 'git push' "$F" || rc=1
+  push_block '' "git push origin 'feat/x'" || rc=1
+  push_block '' "git push origin 'main:feat/x'" || rc=1
+  push_block '' "git push origin 'maintenance'" || rc=1
+  push_block '' "git commit -m 'main' && git push -u origin feat/x" || rc=1
+  push_block '' "sh -c 'git switch feat/x && git push'" || rc=1
+  # form 7 — lines that end in a carriage return (CRLF line endings): 6 reported, 5 left alone. The sixth reported
+  # one (the ref is not the last word of the line) was seen before issue #30 too; it is here because the issue names
+  # it as not measured.
+  push_block 1 "git push origin main$R" || rc=1
+  push_block 1 "git push -u origin HEAD:main$R" || rc=1
+  push_block 1 "git push --all$R" || rc=1
+  push_block 1 "git push origin \\$R" "  main$R" || rc=1
+  push_block 3 "$FR" "git switch main$R" "git push$R" "$FR" || rc=1
+  push_block 1 "git push origin main && echo done$R" || rc=1
+  push_block '' "git push -u origin feat/x$R" || rc=1
+  push_block '' "git push origin maintenance$R" || rc=1
+  push_block '' "git push -u origin \\$R" "  feat/x$R" || rc=1
+  push_block '' "$FR" "git switch main$R" "git switch feat/x$R" "git push$R" "$FR" || rc=1
+  push_block '' "$FR" "git switch main$R" "$FR" "$R" "$FR" "git push$R" "$FR" || rc=1
   # pushwrapped / pushonmain / pushflow: the same through run_checks, like pushmain above (block at line 20). The
   # wrapped command is named at the line where it starts (21), the push without a ref at its own line (22); the
   # step-3 block of the real README (switch to main, pull, install) stays accepted.
@@ -446,6 +500,31 @@ EOF
   cp -r "$t/listed" "$t/pushflow"
   printf '\n```bash\ngit switch main && git pull --ff-only origin main\n./install.sh /tmp/x/.claude\n```\n' >> "$t/pushflow/README.md"
   run_checks "$t/pushflow" >/dev/null || { echo "selftest FAIL: README with 'git switch main && git pull' + install rejected"; rc=1; }
+  # pushcrlf / pushcrlfbranch (issue #30): the listed README with CRLF line endings on every line, plus a push block
+  # (block at line 20, command at 21). Before issue #30 the last word of the command was "main" + carriage return and
+  # the whole file passed check 7. The FAIL line names line 21 and carries no carriage return; the same file with a
+  # push of a branch stays accepted.
+  cp -r "$t/listed" "$t/pushcrlf"
+  {
+    while IFS= read -r line; do printf '%s\r\n' "$line"; done < "$t/listed/README.md"
+    printf '\r\n```bash\r\ngit push origin main\r\n```\r\n'
+  } > "$t/pushcrlf/README.md"
+  out="$(run_checks "$t/pushcrlf")"
+  case "$out" in
+    *"FAIL: README.md:21: git push to main"*"$R"*) echo "selftest FAIL: the FAIL line for a CRLF README carries a carriage return"; rc=1 ;;
+    *"FAIL: README.md:21: git push to main"*) ;;
+    *) echo "selftest FAIL: README with CRLF line endings and 'git push origin main' accepted"; rc=1 ;;
+  esac
+  cp -r "$t/listed" "$t/pushcrlfbranch"
+  {
+    while IFS= read -r line; do printf '%s\r\n' "$line"; done < "$t/listed/README.md"
+    printf '\r\n```bash\r\ngit push -u origin feat/x\r\n```\r\n'
+  } > "$t/pushcrlfbranch/README.md"
+  out="$(run_checks "$t/pushcrlfbranch")" || {
+    echo "selftest FAIL: README with CRLF line endings and 'git push -u origin feat/x' rejected:"
+    printf '%s\n' "$out"
+    rc=1
+  }
   # cwdagent / cwdagentbad (check 3, issue #21): agent-file-check.py looks up the paths an agent file names in its
   # working directory, so the gate has to start it in the root it checks - otherwise the result depends on where the
   # gate was started. Both fixtures are the good one plus a .claude/agents/r.md that names
