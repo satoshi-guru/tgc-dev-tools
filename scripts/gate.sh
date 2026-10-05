@@ -71,10 +71,11 @@ frontmatter_ok() {
 #     word is main and not main + carriage return, a backslash in front of the carriage return still joins the
 #     lines, and the reported text carries none
 # Still not seen: an indented code block (four blanks or a tab, no fence) - a switch to main in one of its lines
-# and a push without a ref in the next are two lines outside a fence, so the state is gone (issue #30, left open
-# there on purpose: it changes how the state is scoped); git reached through a variable, a command substitution or
-# a quoted path ("$GIT" push, $(command -v git) push, "/usr/bin/git" push); a file whose only line ends are bare
-# carriage returns (one line for awk); a branch change by other means (git switch --track origin/main,
+# and a push without a ref in the next are two lines outside a fence, so the state is gone (the fourth form of
+# issue #30, left out there on purpose because it changes how the state is scoped; now issue #32); git reached
+# through a variable, a command substitution or a quoted command word ("$GIT" push, $(command -v git) push,
+# "/usr/bin/git" push - issue #33); a file whose only line ends are bare carriage returns (one line for awk,
+# also issue #33); a branch change by other means (git switch --track origin/main,
 # git branch -M main, git clone, git worktree, cd into another clone), `git checkout <path>` without "--" (read as
 # a branch, clears the state), state carried from one code block to the next, a push configured elsewhere
 # (push.default, remote.*.push, an alias), and prose: the check reads commands, not sentences.
