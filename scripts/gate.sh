@@ -21,6 +21,8 @@
 set -uo pipefail
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+# the store program of check 3; one place, because the selftest skips its check 3 cases exactly when check 3 is skipped
+AGENT_CHECKER="$HOME/.claude/scripts/dev/agent-file-check.py"
 FAILS=0
 
 fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
@@ -157,7 +159,7 @@ run_checks() {
     [ -s "$f" ] || fail "empty command file: ${f#"$root"/}"
   done
 
-  local checker="$HOME/.claude/scripts/dev/agent-file-check.py" out
+  local checker="$AGENT_CHECKER" out
   if [ -d "$root/.claude/agents" ] && [ -f "$checker" ]; then
     if ! out="$(python3 "$checker" "$root/.claude/agents" --sections "" --model sonnet,opus,haiku,inherit 2>&1)"; then
       fail "agent-file-check on .claude/agents"
@@ -439,6 +441,39 @@ EOF
   cp -r "$t/listed" "$t/pushflow"
   printf '\n```bash\ngit switch main && git pull --ff-only origin main\n./install.sh /tmp/x/.claude\n```\n' >> "$t/pushflow/README.md"
   run_checks "$t/pushflow" >/dev/null || { echo "selftest FAIL: README with 'git switch main && git pull' + install rejected"; rc=1; }
+  # cwdagent / cwdagentbad (check 3, issue #21): agent-file-check.py looks up the paths an agent file names in its
+  # working directory, so the gate has to start it in the root it checks - otherwise the result depends on where the
+  # gate was started. Both fixtures are the good one plus a .claude/agents/r.md that names
+  # `docs/gate-cwd-case/marker.md`.
+  #   cwdagent:    the path exists below the fixture; run_checks is started in an empty directory -> accepted
+  #                (check 3 in the caller's directory: "Pfad fehlt", gate red on a good tree - the case of the issue)
+  #   cwdagentbad: the path is missing below the fixture; run_checks is started in a directory that has it
+  #                -> rejected by check 3 (check 3 in the caller's directory: gate green on a broken tree)
+  # The caller's working directory is the same after run_checks as before.
+  # Without the store program check 3 is skipped with a note, and so are these cases.
+  if [ -f "$AGENT_CHECKER" ]; then
+    cp -r "$t/good" "$t/cwdagent"
+    mkdir -p "$t/cwdagent/.claude/agents" "$t/cwdagent/docs/gate-cwd-case" "$t/elsewhere" "$t/decoy/docs/gate-cwd-case"
+    printf -- '---\nname: r\ndescription: selftest role file for check 3\nmodel: sonnet\ntools: Read\n---\n# Role r\n\nRead first: `docs/gate-cwd-case/marker.md`.\n' > "$t/cwdagent/.claude/agents/r.md"
+    printf 'marker\n' > "$t/cwdagent/docs/gate-cwd-case/marker.md"
+    out="$(cd "$t/elsewhere" && run_checks "$t/cwdagent" 2>&1)" || {
+      echo "selftest FAIL: agent file whose named path exists below the checked root rejected when started in another directory:"
+      printf '%s\n' "$out"
+      rc=1
+    }
+    ( cd "$t/elsewhere" && here="$(pwd)" && { run_checks "$t/cwdagent" >/dev/null 2>&1; [ "$(pwd)" = "$here" ]; } ) || {
+      echo "selftest FAIL: run_checks left its caller in another working directory"; rc=1; }
+    cp -r "$t/good" "$t/cwdagentbad"
+    mkdir -p "$t/cwdagentbad/.claude/agents"
+    cp "$t/cwdagent/.claude/agents/r.md" "$t/cwdagentbad/.claude/agents/r.md"
+    printf 'marker\n' > "$t/decoy/docs/gate-cwd-case/marker.md"
+    out="$(cd "$t/decoy" && run_checks "$t/cwdagentbad" 2>&1)" && {
+      echo "selftest FAIL: agent file whose named path is missing below the checked root accepted when started in a directory that has it"; rc=1; }
+    printf '%s\n' "$out" | grep -q 'FAIL: agent-file-check on .claude/agents' || {
+      echo "selftest FAIL: cwdagentbad not rejected by check 3"; rc=1; }
+  else
+    echo "selftest note: the check 3 cases cwdagent and cwdagentbad skipped (no store program agent-file-check.py)"
+  fi
   rm -rf "$t"
   [ "$rc" -eq 0 ] && echo "selftest ok"
   return "$rc"
