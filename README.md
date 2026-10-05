@@ -27,6 +27,7 @@ tgc-dev-tools/
 ├── scripts/
 │   ├── gate.sh                 # Offline gate for this repo (not installed) — see "Gate"
 │   ├── readme-listing-check.sh # Does this README list every agent, command, skill and script?
+│   ├── link-start-probe.sh     # Does a program answer the same when started through a symlink? — see "Gate"
 │   ├── skill-drift.sh          # Do the skills here still match ~/.claude/skills? — see "Skills that also exist…"
 │   └── skill-drift-declared.txt # The deliberate differences skill-drift.sh accepts (one fork, one appendix)
 ├── .claude/agents/             # Board role files bb-* for this repo's own build lanes (not installed)
@@ -307,6 +308,13 @@ scripts/gate.sh             # last line "gate: ok" (exit 0) or "gate: FAILED" (e
 scripts/gate.sh --selftest  # proves the checks reject broken fixtures and accept good ones
 ```
 
+The gate checks the repo its own file belongs to, wherever it is started from and also when it is started through
+a symlink to `scripts/gate.sh` or to `scripts/` (issue #29 — before, a link made it check the directory above the
+link, and it ended with `gate: ok` there). Before any numbered check it makes sure that this root is a checkout of
+this repo: a root without `install.sh` or without `README.md` is rejected with
+`FAIL: not a checkout of this repo: no <file> in <root>` and nothing else is checked or run in it. So a deleted
+`README.md` turns the gate red; it no longer skips checks 6 and 7.
+
 What it checks:
 
 1. `bash -n` over `install.sh` and every `scripts/*.sh`
@@ -338,6 +346,21 @@ scripts/readme-listing-check.sh --selftest
 ```
 
 So a new skill, agent or command needs a tree line **and** a `###` section here, or the gate is red.
+
+`scripts/link-start-probe.sh` measures whether a program gives the same answer when it is started through a
+symlink. It starts the program five ways in an empty temp directory — by its path, through a link to the file
+(absolute target, relative target, a link to that link) and through a link to its directory — and compares the
+last output line and the exit code. Read-only; the links live in a temp dir.
+
+```bash
+scripts/link-start-probe.sh scripts/gate.sh   # five "<how>: exit=N last=…" lines, then "link-start: same starts=5" (exit 0) or "link-start: DIFFERENT differing=K starts=5" (exit 1)
+scripts/link-start-probe.sh --selftest        # 6 cases on temp fixtures
+```
+
+It is not a gate check (the gate's own selftest starts the gate through links). `scripts/gate.sh` gives the same
+answer on all five starts since issue #29; `scripts/readme-listing-check.sh`, `scripts/skill-drift.sh` and
+`install.sh` do not yet — started through a link they look for the repo above the link and end red on a good repo
+(exit 1 / exit 2 / a `cp` error), see issue #35. Start those three by their real path.
 
 `scripts/skill-drift.sh` is deliberately **not** a gate check (it reads `~/.claude/skills`, which differs per
 machine and changes without a commit here); see "Skills that also exist in `~/.claude/skills`".
