@@ -408,9 +408,12 @@ command also needs its tree line and `###` section in this README (the gate chec
 | hl_game_backend | `/home/rootvault/Dokumente/hl_game_backend` | Game feature sandbox (Gemini) |
 
 **Key rules enforced by these tools:**
-- Never merge game-backend → main (manual extraction only)
-- Never scp — commit+push+deploy only
+All four are about work in `hl_claw_bot` and `hl_game_backend`, not about this repo: work on tgc-dev-tools itself
+pushes its work branch and goes through a pull request (see "Update Workflow").
+- Never merge game-backend → main: a feature moves from `hl_game_backend` to `hl_claw_bot` by manual extraction only.
+  `hl_game_backend` is read-only for `code-porter` — the agent never edits, commits or pushes there.
+- Never bring `hl_claw_bot` code to the VPS with `scp` — it gets there only as a commit that is pushed and then
+  deployed. This rule excludes `scp` as a transport; it does not itself allow a push (that is the next bullet).
 - In `hl_claw_bot` and `hl_game_backend`: never push without explicit user instruction — "push this" or "deploy"
-  (`code-porter`, `/port-feature`). Work on tgc-dev-tools itself is different: the work branch is pushed and goes
-  through a pull request (see "Update Workflow").
-- Gemini's code is always a draft — review and upgrade before porting
+  (`code-porter`, `/port-feature`).
+- Gemini's code in `hl_game_backend` is always a draft — review and upgrade it before porting to `hl_claw_bot`
