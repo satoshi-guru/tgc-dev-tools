@@ -387,5 +387,7 @@ command also needs its tree line and `###` section in this README (the gate chec
 **Key rules enforced by these tools:**
 - Never merge game-backend → main (manual extraction only)
 - Never scp — commit+push+deploy only
-- Never push without explicit user instruction
+- In `hl_claw_bot` and `hl_game_backend`: never push without explicit user instruction — "push this" or "deploy"
+  (`code-porter`, `/port-feature`). Work on tgc-dev-tools itself is different: the work branch is pushed and goes
+  through a pull request (see "Update Workflow").
 - Gemini's code is always a draft — review and upgrade before porting
