@@ -17,7 +17,8 @@
 #      number of the line where the command starts; a quoted command counts too, the check cannot read a "never" in
 #      front of it; skipped without README.md). Since issue #18 also: a command wrapped with a backslash, options
 #      between git and push (git -C dir push ...), --all / --mirror / --branches, and a push without a ref after a
-#      switch or checkout to main in the same code block
+#      switch or checkout to main in the same code block. Since issue #30 also: git called by its path
+#      (/usr/bin/git push ...), a ref or command in single quotes, and lines that end in a carriage return (CRLF)
 # Usage:  scripts/gate.sh            # run from anywhere; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
 #          scripts/gate.sh --selftest # proves the checks fail on 12 broken fixtures and pass on 7 good ones (+ 29 line cases and 86 block cases for check 7)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
@@ -60,15 +61,29 @@ frontmatter_ok() {
 #     fence it lives for one line. A switch or checkout to another branch, a new branch or --detach clears it;
 #     `git checkout -- path` leaves it. `git push --tags` without a ref pushes tags only and is left alone; the word
 #     after -o / --push-option / --receive-pack / --exec is an option value, not the remote.
-# Still not seen: a branch change by other means (git switch --track origin/main, git branch -M main, git clone,
-# git worktree, cd into another clone), `git checkout <path>` without "--" (read as a branch, clears the state),
-# state carried from one code block to the next, a push configured elsewhere (push.default, remote.*.push, an
-# alias), and prose: the check reads commands, not sentences.
+# Also reported since issue #30:
+#   - git called by its path: a command word that ends in /git (/usr/bin/git, ./git, ~/bin/git) is read like git.
+#     A word that only ends in the letters git (legit, my-git, x/.git) is not, and a path or URL that ends in /git
+#     matters only when the word after it (options aside) is push, switch or checkout
+#   - single quotes: they are stripped like double quotes, around the ref (git push origin 'main') and around a
+#     whole command (sh -c 'git switch main && git push')
+#   - CRLF line endings: carriage returns at the end of a line are dropped before the line is read, so the last
+#     word is main and not main + carriage return, a backslash in front of the carriage return still joins the
+#     lines, and the reported text carries none
+# Still not seen: an indented code block (four blanks or a tab, no fence) - a switch to main in one of its lines
+# and a push without a ref in the next are two lines outside a fence, so the state is gone (issue #30, left open
+# there on purpose: it changes how the state is scoped); git reached through a variable, a command substitution or
+# a quoted path ("$GIT" push, $(command -v git) push, "/usr/bin/git" push); a file whose only line ends are bare
+# carriage returns (one line for awk); a branch change by other means (git switch --track origin/main,
+# git branch -M main, git clone, git worktree, cd into another clone), `git checkout <path>` without "--" (read as
+# a branch, clears the state), state carried from one code block to the next, a push configured elsewhere
+# (push.default, remote.*.push, an alias), and prose: the check reads commands, not sentences.
 readme_push_main() {
   awk '
     function issep(t) { return (t == "&&" || t == "||" || t == "|" || t == ";" || t == "`" || t ~ /^#/) }
-    function bare(t) { gsub(/^["(]+|[.,:;!?)"]+$/, "", t); return t }
-    { L[NR] = $0 }
+    # \047 is the single quote: the awk program itself stands in single quotes, so it cannot be written literally
+    function bare(t) { gsub(/^["\047(]+|[.,:;!?)"\047]+$/, "", t); return t }
+    { s = $0; sub(/\r+$/, "", s); L[NR] = s }
     END {
       fence = 0; onmain = 0; found = 0
       for (r = 1; r <= NR; r = nx) {
@@ -90,15 +105,18 @@ readme_push_main() {
         else if (!fence) onmain = 0
         hit = 0
         for (i = 1; i < n && !hit; i++) {
-          if (tok[i] !~ /(^|[^A-Za-z0-9_.\/-])git$/) continue
+          # the command word: git at the start of the word, after a character that is no part of a name ("git,
+          # (git, `git), or after a slash (/usr/bin/git, ./git) - not legit, my-git, .git
+          if (tok[i] !~ /(^|[^A-Za-z0-9_.\/-]|\/)git$/) continue
           k = i + 1
           while (k <= n && tok[k] ~ /^-/) {
             k += (tok[k] ~ /^(-C|-c|--git-dir|--work-tree|--namespace|--config-env)$/) ? 2 : 1
           }
           if (k > n) continue
           cmd = tok[k]; ended = 0
-          # "push." / "push)" in a sentence or a subshell: the command ends at the word itself
-          if (cmd ~ /^(push|switch|checkout)[.,:;!?)"]+$/) { ended = 1; cmd = bare(cmd) }
+          # "push." / "push)" / "push" + quote in a sentence, a subshell or a quoted command: the command ends at the
+          # word itself
+          if (cmd ~ /^(push|switch|checkout)[.,:;!?)"\047]+$/) { ended = 1; cmd = bare(cmd) }
           if (cmd == "push") {
             pos = 0; tags = 0
             for (j = k + 1; j <= n && !ended && !hit; j++) {
