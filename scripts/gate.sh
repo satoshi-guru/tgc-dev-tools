@@ -2,6 +2,10 @@
 # gate.sh — offline gate for tgc-dev-tools (fleet board gate, routing["gates"]).
 #
 # What it checks (no internet, no dependencies beyond bash/python3 + the store's agent-file-check):
+#   0. the root is a checkout of this repo: it has install.sh and README.md (issue #29). A root without them is
+#      rejected and nothing else is checked or run there - before, nearly every check was skipped on such a root and
+#      the gate was green on a directory it had not looked at. The root is the repo this file belongs to: a symlink
+#      to this file or to scripts/ is resolved first (before, the root was the directory above the link)
 #   1. bash -n over install.sh and every scripts/*.sh
 #   2. agents/*.md and skills/*/SKILL.md carry YAML frontmatter with name + description;
 #      commands/*.md are non-empty
@@ -12,19 +16,38 @@
 #      copies every entry of a skill (hidden ones too) except its evals/, and leaves an evals/ folder that a
 #      destination already had as it was (issue #8)
 #   5. install.sh has no default destination (static read of the file; the gate never runs it without one)
-#   6. README.md lists every agent, command, skill and script (scripts/readme-listing-check.sh; skipped without README.md)
+#   6. README.md lists every agent, command, skill and script (scripts/readme-listing-check.sh; a root without
+#      README.md does not get this far since issue #29, check 0)
 #   7. README.md carries no `git push` command whose target is main (issue #16; one FAIL per command line, with the
 #      number of the line where the command starts; a quoted command counts too, the check cannot read a "never" in
-#      front of it; skipped without README.md). Since issue #18 also: a command wrapped with a backslash, options
+#      front of it; a root without README.md does not get this far, check 0). Since issue #18 also: a command wrapped with a backslash, options
 #      between git and push (git -C dir push ...), --all / --mirror / --branches, and a push without a ref after a
 #      switch or checkout to main in the same code block. Since issue #30 also: git called by its path
 #      (/usr/bin/git push ...), a ref or command in single quotes, and lines that end in a carriage return (CRLF)
-# Usage:  scripts/gate.sh            # run from anywhere; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 12 broken fixtures and pass on 7 good ones (+ 29 line cases and 86 block cases for check 7)
+# Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
+#          scripts/gate.sh --selftest # proves the checks fail on 15 broken fixtures and pass on 7 good ones (+ 29 line cases and 86 block cases for check 7,
+#          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 set -uo pipefail
 
-SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+# real_path FILE — absolute path of FILE with every symlink resolved (issue #29): a link to the file by readlink (a
+# chain of at most 40 links, relative targets read from the link's own directory), a link in the directory part by
+# cd -P. Only bash and readlink, so it does not depend on realpath or on readlink -f being there.
+real_path() {
+  local p="$1" d t n=0
+  while [ -L "$p" ] && [ "$n" -lt 40 ]; do
+    d="$(cd -P "$(dirname "$p")" && pwd)" || return 1
+    t="$(readlink "$p")" || return 1
+    case "$t" in /*) p="$t" ;; *) p="$d/$t" ;; esac
+    n=$((n + 1))
+  done
+  d="$(cd -P "$(dirname "$p")" && pwd)" || return 1
+  printf '%s/%s\n' "$d" "$(basename "$p")"
+}
+
+# issue #29: SELF is the program file itself, not the link the gate was started by - the root and the path of
+# readme-listing-check.sh are derived from it
+SELF="$(real_path "${BASH_SOURCE[0]}")" || { echo "gate.sh: cannot resolve its own path: ${BASH_SOURCE[0]}" >&2; echo "gate: FAILED"; exit 1; }
 # the store program of check 3; one place, because the selftest skips its check 3 cases exactly when check 3 is skipped
 AGENT_CHECKER="$HOME/.claude/scripts/dev/agent-file-check.py"
 FAILS=0
@@ -167,6 +190,13 @@ run_checks() {
   local root="$1" f
   FAILS=0
 
+  # check 0 (issue #29): the root is a checkout of this repo. Without install.sh and README.md nearly every check
+  # below is skipped or has nothing to read, so an empty directory - or the directory above a link to this file -
+  # passed with nothing checked. Such a root is rejected here, and nothing in it is read or run.
+  [ -f "$root/install.sh" ] || fail "not a checkout of this repo: no install.sh in $root"
+  [ -f "$root/README.md" ] || fail "not a checkout of this repo: no README.md in $root"
+  [ "$FAILS" -eq 0 ] || return 1
+
   for f in "$root/install.sh" "$root"/scripts/*.sh; do
     [ -f "$f" ] || continue
     bash -n "$f" 2>/dev/null || fail "bash -n ${f#"$root"/}"
@@ -282,6 +312,33 @@ push_block() {
   return 1
 }
 
+# fixture_readme FILE — writes the README of the selftest fixtures: it names agent a, command c, skill x and
+# install.sh, so check 6 is green on the good fixture. 19 lines; the push cases append their block at line 20.
+fixture_readme() {
+  printf '# f\n\n```\nf/\n├── agents/\n│   └── a.md\n├── commands/\n│   └── c.md\n├── skills/\n│   └── x/\n└── install.sh\n```\n\n### `a`\n\n### `/c`\n\n### `/x`\n' > "$1"
+}
+
+# link_case WHAT DIR PATH WANT [TEXT] — selftest helper (issue #29): starts the gate file PATH with bash in the
+# directory DIR. WANT is "<last output line> exit=N"; with TEXT the output must carry that text as well, which
+# tells a rejection for the real root's reason from a rejection of some other root. Prints the difference and
+# returns 1 when it does not hold.
+link_case() {
+  local out code got
+  out="$(cd "$2" && bash "$3" 2>&1)"
+  code=$?
+  got="${out##*$'\n'} exit=$code"
+  if [ "$got" != "$4" ]; then
+    echo "selftest FAIL: $1: want '$4' got '$got'"
+    return 1
+  fi
+  if [ -n "${5:-}" ] && ! printf '%s\n' "$out" | grep -q -F -- "$5"; then
+    echo "selftest FAIL: $1: the output lacks '$5':"
+    printf '%s\n' "$out"
+    return 1
+  fi
+  return 0
+}
+
 selftest() {
   local t rc=0
   t="$(mktemp -d)"
@@ -289,11 +346,33 @@ selftest() {
   printf -- '---\nname: a\ndescription: d\n---\nbody\n' > "$t/good/agents/a.md"
   printf 'cmd\n' > "$t/good/commands/c.md"
   printf -- '---\nname: x\ndescription: d\n---\nbody\n' > "$t/good/skills/x/SKILL.md"
+  # empty / noinstall / noreadme (check 0, issue #29): a directory with nothing in it, the good fixture without
+  # install.sh and the good fixture without README.md -> each rejected as "not a checkout of this repo", naming
+  # exactly what is missing. Before issue #29 the first passed with nothing checked and the third was the good
+  # fixture itself. noinstall and noreadme are copies of the good fixture taken while it is being put together.
+  local out0
+  mkdir -p "$t/empty"
+  cp -r "$t/good" "$t/noinstall"
+  fixture_readme "$t/noinstall/README.md"
   cp "$(dirname "$SELF")/../install.sh" "$t/good/install.sh"
+  cp -r "$t/good" "$t/noreadme"
+  fixture_readme "$t/good/README.md"
+  out0="$(run_checks "$t/empty" 2>&1)" && { echo "selftest FAIL: empty directory accepted (issue #29)"; rc=1; }
+  printf '%s\n' "$out0" | grep -q 'FAIL: not a checkout of this repo: no install.sh in ' || { echo "selftest FAIL: empty directory not rejected for the missing install.sh"; rc=1; }
+  printf '%s\n' "$out0" | grep -q 'FAIL: not a checkout of this repo: no README.md in ' || { echo "selftest FAIL: empty directory not rejected for the missing README.md"; rc=1; }
+  out0="$(run_checks "$t/noinstall" 2>&1)" && { echo "selftest FAIL: root without install.sh accepted (issue #29)"; rc=1; }
+  [ "$out0" = "FAIL: not a checkout of this repo: no install.sh in $t/noinstall" ] || { echo "selftest FAIL: root without install.sh, want exactly the line for install.sh, got: $out0"; rc=1; }
+  out0="$(run_checks "$t/noreadme" 2>&1)" && { echo "selftest FAIL: root without README.md accepted (issue #29)"; rc=1; }
+  [ "$out0" = "FAIL: not a checkout of this repo: no README.md in $t/noreadme" ] || { echo "selftest FAIL: root without README.md, want exactly the line for README.md, got: $out0"; rc=1; }
+  # bad: since check 0 it carries the README too, so it is still checks 1 and 2 that reject it - and they are named
   printf 'no frontmatter\n' > "$t/bad/agents/a.md"
   printf 'echo "unterminated\n' > "$t/bad/install.sh"
+  fixture_readme "$t/bad/README.md"
   run_checks "$t/good" >/dev/null || { echo "selftest FAIL: good fixture rejected"; rc=1; }
   run_checks "$t/bad" >/dev/null && { echo "selftest FAIL: bad fixture accepted"; rc=1; }
+  out0="$(run_checks "$t/bad" 2>&1)"
+  printf '%s\n' "$out0" | grep -q -x 'FAIL: bash -n install.sh' || { echo "selftest FAIL: bad fixture not rejected by check 1 (bash -n install.sh)"; rc=1; }
+  printf '%s\n' "$out0" | grep -q -x 'FAIL: frontmatter name/description: agents/a.md' || { echo "selftest FAIL: bad fixture not rejected by check 2 (frontmatter of agents/a.md)"; rc=1; }
   # default: good fixture whose install.sh carries a default destination again -> rejected (check 5)
   cp -r "$t/good" "$t/default"
   printf 'DEST="${1:-/nonexistent/.claude}"\n' >> "$t/default/install.sh"
@@ -325,8 +404,10 @@ selftest() {
   out="$(run_checks "$t/nohidden" 2>&1)" && { echo "selftest FAIL: installer that drops hidden entries accepted"; rc=1; }
   printf '%s\n' "$out" | grep -q 'did not copy every entry of every skill' || { echo "selftest FAIL: nohidden not rejected for the missing hidden entry"; rc=1; }
   # listed / drift: good fixture with a README that names everything -> accepted, one that names nothing -> rejected (check 6)
+  # (since issue #29 the good fixture carries that README already - check 0 wants one; it is written again here so
+  # that this case does not depend on it)
   cp -r "$t/good" "$t/listed"
-  printf '# f\n\n```\nf/\n├── agents/\n│   └── a.md\n├── commands/\n│   └── c.md\n├── skills/\n│   └── x/\n└── install.sh\n```\n\n### `a`\n\n### `/c`\n\n### `/x`\n' > "$t/listed/README.md"
+  fixture_readme "$t/listed/README.md"
   run_checks "$t/listed" >/dev/null || { echo "selftest FAIL: listed fixture rejected"; rc=1; }
   cp -r "$t/good" "$t/drift"
   printf '# f\n\nnothing listed, install.sh\n' > "$t/drift/README.md"
@@ -577,11 +658,53 @@ EOF
   else
     echo "selftest note: the check 3 cases cwdagent and cwdagentbad skipped (no store program agent-file-check.py)"
   fi
+  # link cases (issue #29): the gate file itself, started with bash in an empty directory, directly and through
+  # symlinks - the last line and the exit code are those of the repo the file belongs to, never of the directory
+  # above the link.
+  #   linkrepo / linkrepobad: the good fixture plus scripts/ with a copy of this file and of readme-listing-check.sh;
+  #                           linkrepobad has an agent without frontmatter (check 2 red)
+  #   overgood / overbad:     a passing and a failing tree WITHOUT scripts/ - the directories the links are put into.
+  #                           A gate that takes the directory above the link reads these instead: green on the
+  #                           link to linkrepobad, red on the link to linkrepo
+  # 10 starts: 2 direct, 2 through a file link in an otherwise empty directory (the measured case of the issue), 2
+  # through a file link inside overgood / overbad, 1 through a link with a relative target, 1 through a link to a
+  # link, 2 through a link to the scripts/ directory. Every rejected start must name the agent of linkrepobad.
+  local why='FAIL: frontmatter name/description: agents/a.md'
+  cp -r "$t/good" "$t/linkrepo"
+  mkdir -p "$t/linkrepo/scripts"
+  cp "$SELF" "$t/linkrepo/scripts/gate.sh"
+  cp "$(dirname "$SELF")/readme-listing-check.sh" "$t/linkrepo/scripts/readme-listing-check.sh"
+  printf '\nGate: `scripts/gate.sh` with `scripts/readme-listing-check.sh`\n' >> "$t/linkrepo/README.md"
+  cp -r "$t/linkrepo" "$t/linkrepobad"
+  printf 'no frontmatter\n' > "$t/linkrepobad/agents/a.md"
+  cp -r "$t/good" "$t/overgood"
+  cp -r "$t/good" "$t/overbad"
+  printf 'no frontmatter\n' > "$t/overbad/agents/a.md"
+  mkdir -p "$t/cwd" "$t/lone/sub" "$t/overgood/sub" "$t/overbad/sub" "$t/rel/sub" "$t/chain/sub"
+  ln -s "$t/linkrepo/scripts/gate.sh" "$t/lone/sub/gate.sh"
+  ln -s "$t/linkrepobad/scripts/gate.sh" "$t/lone/sub/gate-bad.sh"
+  ln -s "$t/linkrepobad/scripts/gate.sh" "$t/overgood/sub/gate.sh"
+  ln -s "$t/linkrepo/scripts/gate.sh" "$t/overbad/sub/gate.sh"
+  ln -s ../../linkrepobad/scripts/gate.sh "$t/rel/sub/gate.sh"
+  ln -s "$t/rel/sub/gate.sh" "$t/chain/sub/gate.sh"
+  ln -s "$t/linkrepobad/scripts" "$t/overgood/scripts"
+  ln -s "$t/linkrepo/scripts" "$t/overbad/scripts"
+  link_case "direct start, good tree" "$t/cwd" "$t/linkrepo/scripts/gate.sh" 'gate: ok exit=0' || rc=1
+  link_case "direct start, broken tree" "$t/cwd" "$t/linkrepobad/scripts/gate.sh" 'gate: FAILED exit=1' "$why" || rc=1
+  link_case "file link in an empty directory, good tree" "$t/cwd" "$t/lone/sub/gate.sh" 'gate: ok exit=0' || rc=1
+  link_case "file link in an empty directory, broken tree" "$t/cwd" "$t/lone/sub/gate-bad.sh" 'gate: FAILED exit=1' "$why" || rc=1
+  link_case "file link to the broken tree, placed inside a passing tree" "$t/cwd" "$t/overgood/sub/gate.sh" 'gate: FAILED exit=1' "$why" || rc=1
+  link_case "file link to the good tree, placed inside a failing tree" "$t/cwd" "$t/overbad/sub/gate.sh" 'gate: ok exit=0' || rc=1
+  link_case "file link with a relative target, broken tree" "$t/cwd" "$t/rel/sub/gate.sh" 'gate: FAILED exit=1' "$why" || rc=1
+  link_case "link to a link, broken tree" "$t/cwd" "$t/chain/sub/gate.sh" 'gate: FAILED exit=1' "$why" || rc=1
+  link_case "link to scripts/ of the broken tree, placed inside a passing tree" "$t/cwd" "$t/overgood/scripts/gate.sh" 'gate: FAILED exit=1' "$why" || rc=1
+  link_case "link to scripts/ of the good tree, placed inside a failing tree" "$t/cwd" "$t/overbad/scripts/gate.sh" 'gate: ok exit=0' || rc=1
   rm -rf "$t"
   [ "$rc" -eq 0 ] && echo "selftest ok"
   return "$rc"
 }
 
 if [ "${1:-}" = "--selftest" ]; then selftest; exit $?; fi
-ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+# issue #29: SELF is resolved, so this is the repo the program file belongs to, however the gate was started
+ROOT="$(cd -P "$(dirname "$SELF")/.." && pwd)"
 if run_checks "$ROOT"; then echo "gate: ok"; else echo "gate: FAILED"; exit 1; fi
