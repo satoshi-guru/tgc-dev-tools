@@ -311,7 +311,9 @@ What it checks:
 
 1. `bash -n` over `install.sh` and every `scripts/*.sh`
 2. `agents/*.md` and `skills/*/SKILL.md` carry YAML frontmatter with `name` + `description`; `commands/*.md` are non-empty
-3. `.claude/agents/*.md` pass `~/.claude/scripts/dev/agent-file-check.py` (skipped with a note when that store is absent)
+3. `.claude/agents/*.md` pass `~/.claude/scripts/dev/agent-file-check.py` (skipped with a note when that store is
+   absent). The checker looks up the paths an agent file names in its working directory, so the gate starts it in
+   the repo root — the result is the same wherever the gate itself is started from (issue #21)
 4. `install.sh` into a temp dir installs every agent, command and skill dir (counts match), copies every entry of
    a skill (hidden ones too) except its `evals/`, and leaves an `evals/` folder the destination already had as it was
 5. `install.sh` has no default destination (read statically — the gate never runs it without a destination)

@@ -5,7 +5,9 @@
 #   1. bash -n over install.sh and every scripts/*.sh
 #   2. agents/*.md and skills/*/SKILL.md carry YAML frontmatter with name + description;
 #      commands/*.md are non-empty
-#   3. .claude/agents/*.md pass ~/.claude/scripts/dev/agent-file-check.py (skipped with a note if the store is absent)
+#   3. .claude/agents/*.md pass ~/.claude/scripts/dev/agent-file-check.py (skipped with a note if the store is absent).
+#      The checker is started in the repo root, because it looks up the paths an agent file names in its working
+#      directory (issue #21: started elsewhere, the gate was red on a good tree or green on a broken one)
 #   4. install.sh into a temp dir installs every agent, command and skill dir of this repo (counts match),
 #      copies every entry of a skill (hidden ones too) except its evals/, and leaves an evals/ folder that a
 #      destination already had as it was (issue #8)
@@ -17,7 +19,8 @@
 #      between git and push (git -C dir push ...), --all / --mirror / --branches, and a push without a ref after a
 #      switch or checkout to main in the same code block
 # Usage:  scripts/gate.sh            # run from anywhere; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 10 broken fixtures and pass on 5 good ones (+ 23 line cases and 53 block cases for check 7)
+#          scripts/gate.sh --selftest # proves the checks fail on 11 broken fixtures and pass on 6 good ones (+ 23 line cases and 53 block cases for check 7)
+#          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 set -uo pipefail
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
@@ -161,7 +164,9 @@ run_checks() {
 
   local checker="$AGENT_CHECKER" out
   if [ -d "$root/.claude/agents" ] && [ -f "$checker" ]; then
-    if ! out="$(python3 "$checker" "$root/.claude/agents" --sections "" --model sonnet,opus,haiku,inherit 2>&1)"; then
+    # issue #21: the checker looks up the paths an agent file names in its working directory, so it is started in
+    # the root that is checked. The $( ) is a subshell: the working directory of the gate's caller stays as it was.
+    if ! out="$(cd "$root" && python3 "$checker" .claude/agents --sections "" --model sonnet,opus,haiku,inherit 2>&1)"; then
       fail "agent-file-check on .claude/agents"
       printf '%s\n' "$out"
     fi
