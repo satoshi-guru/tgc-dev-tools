@@ -23,8 +23,8 @@ Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; 
 install-status.sh — is a project's .claude in step with this repo? Read-only compare by name AND content.
 Usage:   scripts/install-status.sh [--source ROOT] <destination>             # <destination> = the .claude directory
          scripts/install-status.sh [--source ROOT] --rehearse <destination>  # what would an install change?
-         scripts/install-status.sh --selftest                                # 8 cases on temp fixtures
-Options: --source ROOT  repo to compare against (default: the repo this script lives in)
+         scripts/install-status.sh --selftest                                # 10 cases on temp fixtures, 10 starts through symlinks among them (issue #43)
+Options: --source ROOT  repo to compare against (default: the repo this script lives in, also through a symlink)
          --rehearse     status of a temp copy before and after install.sh; the real destination stays untouched
 Output:  one line per tool (SAME · DIFFERS · MISSING · EXTRA, and NOTE for an evals/ folder there), then the last line
          "install-status: in step same=S extra=E" or "install-status: BEHIND missing=M differs=D same=S extra=E"
