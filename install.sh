@@ -16,7 +16,10 @@
 # ~/.claude as destination overwrites the four global skills of the same name (README, section
 # "Skills that also exist in ~/.claude/skills") - run scripts/skill-drift.sh and compare first.
 # The source is always the repo this file belongs to, also when it is started through a symlink (issue #35).
-# Exit: 0 installed · 1 a copy failed or its own path cannot be resolved · 2 no destination given
+# The source is looked at before anything is written: without agents/, commands/ and skills/ beside this file the
+# install stops with one line that names the missing folders, and the destination is not created (issue #45).
+# Exit: 0 installed · 1 a copy failed, its own path cannot be resolved, or the source has no agents/, commands/ or
+#       skills/ (the last two: nothing installed) · 2 no destination given
 
 set -euo pipefail
 
@@ -31,6 +34,7 @@ Usage: ./install.sh <destination>
 Copies agents/*.md, commands/*.md and every skills/<name>/ of this repo into
 <destination>, overwriting files of the same name. There is no default destination.
 A skill's evals/ folder is not installed; nothing in <destination> is removed.
+Without agents/, commands/ and skills/ beside install.sh nothing is installed (exit 1).
 USAGE
 }
 
@@ -70,6 +74,19 @@ real_path() {
 # SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$(real_path "${BASH_SOURCE[0]}")" || { echo "install.sh: cannot resolve its own path: ${BASH_SOURCE[0]} (nothing installed)" >&2; exit 1; }
 SCRIPT_DIR="$(dirname "$SELF")"
+
+# issue #45: look at the source before anything is written. Until then the mkdir below ran first: from a source
+# without agents/ the install stopped with a cp error on an unmatched pattern and left agents/, commands/ and skills/
+# behind in a destination that did not have them; without commands/ it had installed the agents by then; without
+# skills/ it ended with exit 0 and a skill directory named "*". Folders only - what is inside them is not looked at.
+missing=""
+for d in agents commands skills; do
+  [ -d "$SCRIPT_DIR/$d" ] || missing="${missing:+$missing, }$d/"
+done
+if [ -n "$missing" ]; then
+  echo "install.sh: not a checkout of tgc-dev-tools: no $missing in $SCRIPT_DIR (nothing installed)" >&2
+  exit 1
+fi
 
 echo "Installing tgc-dev-tools into: $DEST"
 
