@@ -23,9 +23,10 @@
 #      front of it; a root without README.md does not get this far, check 0). Since issue #18 also: a command wrapped with a backslash, options
 #      between git and push (git -C dir push ...), --all / --mirror / --branches, and a push without a ref after a
 #      switch or checkout to main in the same code block. Since issue #30 also: git called by its path
-#      (/usr/bin/git push ...), a ref or command in single quotes, and lines that end in a carriage return (CRLF)
+#      (/usr/bin/git push ...), a ref or command in single quotes, and lines that end in a carriage return (CRLF).
+#      Since issue #33 also: the command word in quotes ("git" push ..., "/usr/bin/git" push ...)
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 15 broken fixtures and pass on 7 good ones (+ 29 line cases and 86 block cases for check 7,
+#          scripts/gate.sh --selftest # proves the checks fail on 15 broken fixtures and pass on 7 good ones (+ 29 line cases and 109 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 set -uo pipefail
@@ -93,12 +94,19 @@ frontmatter_ok() {
 #   - CRLF line endings: carriage returns at the end of a line are dropped before the line is read, so the last
 #     word is main and not main + carriage return, a backslash in front of the carriage return still joins the
 #     lines, and the reported text carries none
+# Also reported since issue #33:
+#   - the command word in quotes: "git" push, 'git' push, "/usr/bin/git" push (also a quoted path with a blank in
+#     it, and /usr/bin/"git"). Quotes at the end of the command word are dropped before it is tested; what the word
+#     has to be is unchanged ("legit", "my-git", "x/.git" are no command, and a quoted path or URL that ends in /git
+#     matters only when the word after it, options aside, is push, switch or checkout)
 # Still not seen: an indented code block (four blanks or a tab, no fence) - a switch to main in one of its lines
 # and a push without a ref in the next are two lines outside a fence, so the state is gone (the fourth form of
 # issue #30, left out there on purpose because it changes how the state is scoped; now issue #32); git reached
-# through a variable, a command substitution or a quoted command word ("$GIT" push, $(command -v git) push,
-# "/usr/bin/git" push - issue #33); a file whose only line ends are bare carriage returns (one line for awk,
-# also issue #33); a branch change by other means (git switch --track origin/main,
+# through a variable or a command substitution ("$GIT" push, ${GIT} push, $(command -v git) push,
+# "$(command -v git)" push - left out of issue #33 on purpose: what a variable holds cannot be read from the text,
+# and a rule for "any variable followed by push" would be a guess); a file whose only line ends are bare carriage
+# returns (one line for awk, named in issue #33, not built there); a branch change by other means
+# (git switch --track origin/main,
 # git branch -M main, git clone, git worktree, cd into another clone), `git checkout <path>` without "--" (read as
 # a branch, clears the state), state carried from one code block to the next, a push configured elsewhere
 # (push.default, remote.*.push, an alias), and prose: the check reads commands, not sentences.
@@ -130,8 +138,11 @@ readme_push_main() {
         hit = 0
         for (i = 1; i < n && !hit; i++) {
           # the command word: git at the start of the word, after a character that is no part of a name ("git,
-          # (git, `git), or after a slash (/usr/bin/git, ./git) - not legit, my-git, .git
-          if (tok[i] !~ /(^|[^A-Za-z0-9_.\/-]|\/)git$/) continue
+          # (git, `git), or after a slash (/usr/bin/git, ./git) - not legit, my-git, .git. Quotes at the end of
+          # the word are dropped first (issue #33), so "git", \047git\047 and "/usr/bin/git" are read like git; a
+          # quote in front of the word was no part of a name before. Only quotes: git) stays what it is.
+          c = tok[i]; sub(/["\047]+$/, "", c)
+          if (c !~ /(^|[^A-Za-z0-9_.\/-]|\/)git$/) continue
           k = i + 1
           while (k <= n && tok[k] ~ /^-/) {
             k += (tok[k] ~ /^(-C|-c|--git-dir|--work-tree|--namespace|--config-env)$/) ? 2 : 1
@@ -580,6 +591,37 @@ EOF
   push_block '' "git push -u origin \\$R" "  feat/x$R" || rc=1
   push_block '' "$FR" "git switch main$R" "git switch feat/x$R" "git push$R" "$FR" || rc=1
   push_block '' "$FR" "git switch main$R" "$FR" "$R" "$FR" "git push$R" "$FR" || rc=1
+  # block cases for check 7 (issue #33), one more form.
+  # form 8 — the command word in quotes ("git", 'git', "/usr/bin/git"): 10 reported, 13 left alone. The quotes at the
+  # end of the command word are dropped before it is tested; the rule for the word itself is the one of form 5 (git,
+  # or a path that ends in /git - not legit, my-git, .git), and a quoted path or URL that ends in /git matters only
+  # when the word after it (options aside) is push, switch or checkout.
+  push_block 1 '"/usr/bin/git" push origin main' || rc=1
+  push_block 1 '"git" push origin main' || rc=1
+  push_block 1 "'git' push origin main" || rc=1
+  push_block 1 "'/usr/bin/git' push -u origin HEAD:main" || rc=1
+  push_block 1 '"git" -C ../x push origin main' || rc=1
+  push_block 1 '("/usr/bin/git" push origin main)' || rc=1
+  push_block 1 'Then run `"git" push --all`.' || rc=1
+  push_block 1 '"/opt/my tools/git" push origin main' || rc=1
+  push_block 1 '/usr/bin/"git" push origin main' || rc=1
+  push_block 3 "$F" '"git" switch main' '"git" push' "$F" || rc=1
+  push_block '' '"/usr/bin/git" push -u origin feat/x' || rc=1
+  push_block '' '"git" push origin feat/x' || rc=1
+  push_block '' "'git' pull origin main" || rc=1
+  push_block '' '"legit" push origin main' || rc=1
+  push_block '' '"my-git" push origin main' || rc=1
+  push_block '' '"x/.git" push origin main' || rc=1
+  push_block '' 'git clone "https://example.org/git" main' || rc=1
+  push_block '' 'git -C "../git" push origin feat/x' || rc=1
+  push_block '' 'echo "git" && git push -u origin feat/x' || rc=1
+  push_block '' "$F" '"git" switch main' '"git" switch feat/x' '"git" push' "$F" || rc=1
+  # the last three are not left alone because they are harmless: they are the forms the check cannot read (named
+  # under "Still not seen" above readme_push_main). A variable cannot be resolved from the text, and the quote that
+  # closes "$(...)" is dropped while the bracket in front of it stays, so the word is still no git.
+  push_block '' '"$GIT" push origin main' || rc=1
+  push_block '' '$(command -v git) push origin main' || rc=1
+  push_block '' '"$(command -v git)" push origin main' || rc=1
   # pushwrapped / pushonmain / pushflow: the same through run_checks, like pushmain above (block at line 20). The
   # wrapped command is named at the line where it starts (21), the push without a ref at its own line (22); the
   # step-3 block of the real README (switch to main, pull, install) stays accepted.
