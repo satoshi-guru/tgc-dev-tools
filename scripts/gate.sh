@@ -395,6 +395,24 @@ install_link_case() {
   return 0
 }
 
+# push_main_case WHAT DIR GATE WANT_EXIT WANT_OUT [ARG...] — selftest helper (issue #25): starts the gate file GATE
+# with bash in the directory DIR as "GATE --push-main ARG...". The exit code must be WANT_EXIT and the whole output
+# (stdout and stderr together) must be WANT_OUT, line for line. Prints both and returns 1 when it does not hold.
+push_main_case() {
+  local what="$1" dir="$2" gate="$3" wantcode="$4" want="$5" out code
+  shift 5
+  out="$(cd "$dir" && bash "$gate" --push-main "$@" 2>&1)"
+  code=$?
+  if [ "$code" -ne "$wantcode" ] || [ "$out" != "$want" ]; then
+    echo "selftest FAIL: --push-main, $what: want exit $wantcode and"
+    printf '%s\n' "$want" | sed 's/^/    | /'
+    echo "  got exit $code and"
+    printf '%s\n' "$out" | sed 's/^/    | /'
+    return 1
+  fi
+  return 0
+}
+
 selftest() {
   local t rc=0
   t="$(mktemp -d)"
@@ -755,6 +773,48 @@ EOF
   else
     echo "selftest note: the check 3 cases cwdagent and cwdagentbad skipped (no store program agent-file-check.py)"
   fi
+  # option cases (issue #25): the gate file itself, started with --push-main - check 7 alone, as a readout. One
+  # "FILE:LINE: command" line per report, then a last line with the counts; exit 0 nothing reported, 1 reported,
+  # 2 a FILE that is no readable file (nothing is read then). The whole output is compared, line for line.
+  #   pm/hit.md:   a push to main at line 3
+  #   pm/two.md:   one at line 1 and a wrapped one that starts at line 5
+  #   pm/clean.md: a push of a branch, and main in prose only
+  #   pm/sub/:     a directory - no file; also the empty directory the starts without a FILE are made in
+  #   pmrepo / pmrepobad: the good fixture plus scripts/ with a copy of this file, for the start without a FILE. It
+  #                reads README.md and what install.sh installs from the repo the gate file belongs to, wherever it
+  #                is started. pmrepobad carries a push to main in skills/x/references/flow.md (installed, so it is
+  #                reported) and in skills/x/evals/e.md (not installed, so it is not read and not counted)
+  # 8 starts with --push-main: 3 with files that can be read (one with a report, one without, three files in one
+  # start), 3 with a FILE that is none (missing, missing next to one with a report, a directory), 2 without a FILE
+  # (pmrepo, pmrepobad). Then 1 start with --help: exit 0, the header from its first line on, the option named in it.
+  local helpout
+  mkdir -p "$t/pm/sub"
+  printf '# f\n\ngit push origin main\n' > "$t/pm/hit.md"
+  printf 'git push origin HEAD:main\n\n```bash\ngit fetch origin\ngit push -u origin \\\n  main\n```\n' > "$t/pm/two.md"
+  printf 'The change reaches `main` through a pull request, never by a push to `main`:\n\n```bash\ngit push -u origin feat/x\n```\n' > "$t/pm/clean.md"
+  push_main_case "one file with a push to main" "$t/pm" "$SELF" 1 \
+    $'hit.md:3: git push origin main\npush-main: FOUND hits=1 files=1' hit.md || rc=1
+  push_main_case "one file without one" "$t/pm" "$SELF" 0 'push-main: ok files=1' clean.md || rc=1
+  push_main_case "three files, three reports in two of them" "$t/pm" "$SELF" 1 \
+    $'hit.md:3: git push origin main\ntwo.md:1: git push origin HEAD:main\ntwo.md:5: git push -u origin main\npush-main: FOUND hits=3 files=3' clean.md hit.md two.md || rc=1
+  push_main_case "a FILE that does not exist" "$t/pm" "$SELF" 2 'gate.sh: --push-main: not a readable file: nope.md' nope.md || rc=1
+  push_main_case "a FILE that does not exist next to one with a report" "$t/pm" "$SELF" 2 \
+    'gate.sh: --push-main: not a readable file: nope.md' hit.md nope.md || rc=1
+  push_main_case "a directory as FILE" "$t/pm" "$SELF" 2 'gate.sh: --push-main: not a readable file: sub' sub || rc=1
+  cp -r "$t/good" "$t/pmrepo"
+  mkdir -p "$t/pmrepo/scripts"
+  cp "$SELF" "$t/pmrepo/scripts/gate.sh"
+  cp -r "$t/pmrepo" "$t/pmrepobad"
+  mkdir -p "$t/pmrepobad/skills/x/references" "$t/pmrepobad/skills/x/evals"
+  printf '# flow\n\ngit push origin main\n' > "$t/pmrepobad/skills/x/references/flow.md"
+  printf 'git push origin main\n' > "$t/pmrepobad/skills/x/evals/e.md"
+  push_main_case "no FILE, a repo without a push to main" "$t/pm/sub" "$t/pmrepo/scripts/gate.sh" 0 'push-main: ok files=4' || rc=1
+  push_main_case "no FILE, a repo with one in an installed skill file and one in evals/" "$t/pm/sub" "$t/pmrepobad/scripts/gate.sh" 1 \
+    $'skills/x/references/flow.md:3: git push origin main\npush-main: FOUND hits=1 files=5' || rc=1
+  helpout="$(cd "$t/pm/sub" && bash "$SELF" --help 2>&1)" || { echo "selftest FAIL: --help does not end with exit 0"; rc=1; }
+  [ "${helpout%%$'\n'*}" = "gate.sh — offline gate for tgc-dev-tools (fleet board gate, routing[\"gates\"])." ] || {
+    echo "selftest FAIL: --help does not start with the first line of the header, but with: ${helpout%%$'\n'*}"; rc=1; }
+  printf '%s\n' "$helpout" | grep -q -F -- 'scripts/gate.sh --push-main [FILE ...]' || { echo "selftest FAIL: --help does not name --push-main [FILE ...]"; rc=1; }
   # link cases (issue #29): the gate file itself, started with bash in an empty directory, directly and through
   # symlinks - the last line and the exit code are those of the repo the file belongs to, never of the directory
   # above the link.
