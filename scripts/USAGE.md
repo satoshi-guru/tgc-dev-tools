@@ -8,7 +8,9 @@ gate.sh — offline gate for tgc-dev-tools (fleet board gate, routing["gates"]).
 Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
          scripts/gate.sh --selftest # proves the checks fail on 17 broken fixtures and pass on 8 good ones (+ 29 line cases and 135 block cases for check 7,
          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
-         + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35)
+         + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35,
+         + 4 starts of install.sh in a source without agents/, commands/ or skills/, each with a destination that
+         must not exist afterwards - issue #45)
          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 ```
 

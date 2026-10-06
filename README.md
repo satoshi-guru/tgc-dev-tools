@@ -67,6 +67,12 @@ What the install does:
 - Files of the same name in the destination are **overwritten**; a skill's `evals/` folder is not installed.
 - Nothing in the destination is removed. An `evals/` folder that a skill in the destination already has is left
   untouched (until issue #8 the install deleted it).
+- The source is looked at before anything is written. When `agents/`, `commands/` or `skills/` is missing beside
+  `install.sh` (a copy of the file on its own, say), the install stops with
+  `install.sh: not a checkout of tgc-dev-tools: no <folders> in <source> (nothing installed)` and exit 1, and the
+  destination is not created. Until issue #45 it had made the three folders in the destination by then, and from a
+  source without `skills/` it ended with exit 0 and a skill directory named `*`. Only the three folders are looked
+  at, not what is inside them.
 - `hl_claw_bot` and `hl_game_backend` both list `.claude/` in their `.gitignore`. Installed copies are therefore
   untracked there: they do not show up in `git status`, are not part of a clone, and every checkout or worktree
   of those repos needs its own install. This repo is the only versioned source — edit here, then reinstall.
