@@ -397,7 +397,10 @@ What it checks:
    refspec target is the whole word `main` (`origin main`, `-u origin main`, `HEAD:main`, `feat/x:main`), also when
    the command is wrapped with a backslash or carries options between `git` and `push` (`-C dir`, `-c k=v`);
    the options `--all`, `--mirror` and `--branches`, whatever the remote; and, inside one code block, a push
-   without a ref (or of `HEAD`) after a switch or checkout to `main`. Accepted: a push of a branch
+   without a ref (or of `HEAD`) after a switch or checkout to `main`. A code block is a fenced one or, since
+   issue #32, an indented one: lines with four blanks or a tab in front, where an empty line between them does not
+   end the block and the first line with text that is not indented that far does. The check cannot tell such a
+   block from the indented continuation paragraph of a list item, so it reads both the same way. Accepted: a push of a branch
    (`git push -u origin feat/x`, also `maintenance` or `feat/main-menu`), a switch to `main` that is followed by a
    pull and no push (step 3 of "Update Workflow"), and prose without the command. The check reads the command, not
    the sentence around it: a quoted push to `main` is rejected even after a "never", so describe the rule in words

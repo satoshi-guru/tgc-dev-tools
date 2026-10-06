@@ -26,9 +26,11 @@
 #      between git and push (git -C dir push ...), --all / --mirror / --branches, and a push without a ref after a
 #      switch or checkout to main in the same code block. Since issue #30 also: git called by its path
 #      (/usr/bin/git push ...), a ref or command in single quotes, and lines that end in a carriage return (CRLF).
-#      Since issue #33 also: the command word in quotes ("git" push ..., "/usr/bin/git" push ...)
+#      Since issue #33 also: the command word in quotes ("git" push ..., "/usr/bin/git" push ...).
+#      Since issue #32 also: a push without a ref after a switch or checkout to main in the same indented code block
+#      (lines with four blanks or a tab in front, no fence; an empty line between them does not end the block)
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 16 broken fixtures and pass on 7 good ones (+ 29 line cases and 109 block cases for check 7,
+#          scripts/gate.sh --selftest # proves the checks fail on 17 broken fixtures and pass on 8 good ones (+ 29 line cases and 135 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
@@ -90,7 +92,8 @@ frontmatter_ok() {
 #   - a push without a ref while main is checked out: after `git switch main` / `git checkout main` (also -c / -b /
 #     -C / -B with the new name main) a `git push` with no ref word (nothing, or only the remote), or with the ref
 #     HEAD / @, is reported. The state lives inside one fenced code block (``` or ~~~) and ends with it; outside a
-#     fence it lives for one line. A switch or checkout to another branch, a new branch or --detach clears it;
+#     fence it lives for one line (since issue #32: or for one indented code block, see below). A switch or
+#     checkout to another branch, a new branch or --detach clears it;
 #     `git checkout -- path` leaves it. `git push --tags` without a ref pushes tags only and is left alone; the word
 #     after -o / --push-option / --receive-pack / --exec is an option value, not the remote.
 # Also reported since issue #30:
@@ -107,9 +110,23 @@ frontmatter_ok() {
 #     it, and /usr/bin/"git"). Quotes at the end of the command word are dropped before it is tested; what the word
 #     has to be is unchanged ("legit", "my-git", "x/.git" are no command, and a quoted path or URL that ends in /git
 #     matters only when the word after it, options aside, is push, switch or checkout)
-# Still not seen: an indented code block (four blanks or a tab, no fence) - a switch to main in one of its lines
-# and a push without a ref in the next are two lines outside a fence, so the state is gone (the fourth form of
-# issue #30, left out there on purpose because it changes how the state is scoped; now issue #32); git reached
+# Also reported since issue #32:
+#   - an indented code block (no fence): outside a fence the "main is checked out" state lives from one line to
+#     the next while the lines are indented by four blanks, or by a tab after at most three blanks. An empty line
+#     (nothing, or blanks and tabs only) between two indented lines belongs to the block and keeps the state, as in
+#     CommonMark. The first line with text that is not indented that far ends it. The state has to be set inside
+#     the indented lines: a switch to main in a line that is not indented lives for that line only, as before, so a
+#     sentence that names the switch followed by an indented push is left alone.
+#     Accepted limit: the check cannot tell an indented code block from the indented continuation paragraph of a
+#     list item (CommonMark counts the indent from the list item's content; this check counts it from the start of
+#     the line), so the state is also kept across indented prose and across a block that is nested deeper. That can
+#     only report more, and only where a switch to main and a push without a ref really stand in indented lines
+#     with nothing unindented between them. A fence line indented by four blanks is still read as a fence.
+# Superseded by the block above (issue #32), kept as a comment - this stood at the head of "Still not seen":
+#   an indented code block (four blanks or a tab, no fence) - a switch to main in one of its lines and a push
+#   without a ref in the next are two lines outside a fence, so the state is gone (the fourth form of issue #30,
+#   left out there on purpose because it changes how the state is scoped; now issue #32)
+# Still not seen: git reached
 # through a variable or a command substitution ("$GIT" push, ${GIT} push, $(command -v git) push,
 # "$(command -v git)" push - left out of issue #33 on purpose: what a variable holds cannot be read from the text,
 # and a rule for "any variable followed by push" would be a guess); the subcommand in quotes and quotes or a
@@ -127,7 +144,7 @@ readme_push_main() {
     function bare(t) { gsub(/^["\047(]+|[.,:;!?)"\047]+$/, "", t); return t }
     { s = $0; sub(/\r+$/, "", s); L[NR] = s }
     END {
-      fence = 0; onmain = 0; found = 0
+      fence = 0; onmain = 0; found = 0; block = 0
       for (r = 1; r <= NR; r = nx) {
         # one logical line: the physical lines r .. nx-1, joined where a line ends in a backslash
         n = 0; text = ""; nx = r
@@ -143,8 +160,21 @@ readme_push_main() {
           for (k = 1; k <= m; k++) if (w[k] != "") { tok[++n] = w[k]; tl[n] = nx }
           nx++
         } while (cont)
-        if (L[r] ~ /^[ \t]*(```|~~~)/) { fence = !fence; onmain = 0 }
-        else if (!fence) onmain = 0
+        # Superseded by the three branches below (issue #32); the rule before, kept as a comment - outside a fence
+        # the state was cleared at every line, so it never reached the second line of an indented code block:
+        #   if (fence line) { fence = !fence; onmain = 0 }
+        #   else if (!fence) onmain = 0
+        # block = 1 while the lines read outside a fence are an indented code block: four blanks, or a tab after at
+        # most three blanks, in front of the first physical line of the command. The state is kept from one such
+        # line to the next and across an empty line (blanks and tabs only); it is cleared at the first indented
+        # line after a line that was not (a switch to main in a line that is not indented lives for that line
+        # only, as before) and at every line with text that is not indented that far.
+        if (L[r] ~ /^[ \t]*(```|~~~)/) { fence = !fence; onmain = 0; block = 0 }
+        else if (!fence) {
+          if (L[r] ~ /^[ \t]*$/) { }
+          else if (L[r] ~ /^(    | ? ? ?\t)/) { if (!block) onmain = 0; block = 1 }
+          else { onmain = 0; block = 0 }
+        }
         hit = 0
         for (i = 1; i < n && !hit; i++) {
           # the command word: git at the start of the word, after a character that is no part of a name ("git,
@@ -756,14 +786,14 @@ EOF
     rc=1
   }
   # pushindent / pushindentflow (issue #32): the listed README plus an indented code block (no fence). The appended
-  # text is an empty line (20), a sentence (21), an empty line (22) and the two command lines (23, 24) - the fixture
-  # of the issue. The push without a ref is named at its own line (24); the same block with a switch to main, a pull
+  # text is an empty line (19), a sentence (20), an empty line (21) and the two command lines (22, 23) - the fixture
+  # of the issue. The push without a ref is named at its own line (23); the same block with a switch to main, a pull
   # and the install (step 3 of the real README, written as an indented block) stays accepted.
   cp -r "$t/listed" "$t/pushindent"
   printf '\nAn indented block:\n\n    git switch main\n    git push\n' >> "$t/pushindent/README.md"
   out="$(run_checks "$t/pushindent")"
   case "$out" in
-    *"FAIL: README.md:24: git push to main"*) ;;
+    *"FAIL: README.md:23: git push to main"*) ;;
     *) echo "selftest FAIL: README with 'git switch main' + 'git push' in an indented code block accepted"; rc=1 ;;
   esac
   cp -r "$t/listed" "$t/pushindentflow"
