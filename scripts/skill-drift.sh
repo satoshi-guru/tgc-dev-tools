@@ -16,9 +16,9 @@
 #     <name>                       the whole skill is a FORK
 #     <name>/<file> +appendix      this file starts with the store's file byte for byte and keeps more below it
 # Usage:   scripts/skill-drift.sh [--store DIR] [--root ROOT] [--declared FILE] [NAME ...]
-#          scripts/skill-drift.sh --selftest   # 10 cases on temp fixtures; ~/.claude is never read or written
+#          scripts/skill-drift.sh --selftest   # 11 cases on temp fixtures; ~/.claude is never read or written
 # Options: --store DIR      skill store to compare against (default ~/.claude/skills)
-#          --root ROOT      repo to read skills/ from (default: the repo this script lives in)
+#          --root ROOT      repo to read skills/ from (default: the repo this script lives in, also through a symlink)
 #          --declared FILE  the declarations file (default scripts/skill-drift-declared.txt); --forks is an alias
 #          NAME ...         only these skills (default: every skill dir under skills/)
 # Output:  the lines above, then the last line
@@ -27,7 +27,24 @@
 # Exit:    0 no undeclared drift · 1 drift or a stale declaration · 2 usage / store or root is not a directory
 set -uo pipefail
 
-SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+# real_path FILE — absolute path of FILE with every symlink resolved (issue #35; the function scripts/gate.sh
+# carries since issue #29): a link to the file by readlink (a chain of at most 40 links, relative targets read from
+# the link's own directory), a link in the directory part by cd -P. Only bash and readlink.
+real_path() {
+  local p="$1" d t n=0
+  while [ -L "$p" ] && [ "$n" -lt 40 ]; do
+    d="$(cd -P "$(dirname "$p")" && pwd)" || return 1
+    t="$(readlink "$p")" || return 1
+    case "$t" in /*) p="$t" ;; *) p="$d/$t" ;; esac
+    n=$((n + 1))
+  done
+  d="$(cd -P "$(dirname "$p")" && pwd)" || return 1
+  printf '%s/%s\n' "$d" "$(basename "$p")"
+}
+
+# Superseded by issue #35 (started through a symlink, SELF was the link and the default root the directory above it):
+# SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+SELF="$(real_path "${BASH_SOURCE[0]}")" || { echo "skill-drift.sh: cannot resolve its own path: ${BASH_SOURCE[0]}" >&2; exit 2; }
 SAME=0; EXTRA=0; DRIFT=0; FORK=0; STALE=0; ONLY_HERE=0
 N_DIFFER=0; N_ONLY_HERE=0; N_ONLY_STORE=0; N_APPENDIX=0; N_STALE=0; DETAIL=""; STALE_LINES=""
 
@@ -178,6 +195,28 @@ tree_sum() {
   (cd "$1" && find . -type f -exec cksum {} + | LC_ALL=C sort)
 }
 
+# link_case WHAT DIR WANT TEXT PATH [ARG ...] — selftest helper (issue #35; the form of link_case in scripts/gate.sh):
+# starts the program file PATH with bash in the directory DIR. WANT is "<last output line> exit=N"; a non-empty TEXT
+# must be a whole line of the output as well, which tells the answer for the real repo from the same last line for
+# some other tree. Prints the difference and returns 1 when it does not hold.
+link_case() {
+  local what="$1" dir="$2" want="$3" text="$4" out code got
+  shift 4
+  out="$(cd "$dir" && bash "$@" 2>&1)"
+  code=$?
+  got="${out##*$'\n'} exit=$code"
+  if [ "$got" != "$want" ]; then
+    echo "selftest FAIL: $what: want '$want' got '$got'"
+    return 1
+  fi
+  if [ -n "$text" ] && ! printf '%s\n' "$out" | grep -q -x -F -- "$text"; then
+    echo "selftest FAIL: $what: the output lacks the line '$text':"
+    printf '%s\n' "$out"
+    return 1
+  fi
+  return 0
+}
+
 selftest() {
   local t rc=0 out before_store before_root last
   t="$(mktemp -d)"
@@ -268,12 +307,68 @@ selftest() {
   out="$(report "$t/root" "$t/store" "$t/forks.txt" same)" && { echo "selftest FAIL 10: stale +appendix accepted"; rc=1; }
   printf '%s\n' "$out" | grep -q "^STALE  same/SKILL.md " || { echo "selftest FAIL 10: no STALE line: $out"; rc=1; }
 
+  # 11. started through symlinks (issue #35): the program file itself, started with bash, with --store and without
+  #     --root in an empty directory, directly and through links - the skills and the declarations file are those
+  #     of the repo the file belongs to, never those of the directory above the link.
+  #       linkrepo     skill mine in step, skill variant differs and is declared in scripts/skill-drift-declared.txt,
+  #                    scripts/ holds a copy of this file                    in step same=1 fork=1, line "SAME   mine"
+  #       linkrepobad  the same with mine changed                           DRIFT drift=1 fork=1, line "DRIFT  mine ..."
+  #       overgood     skill other in step, variant as above, no scripts/   the last line of linkrepo, "SAME   other"
+  #       overbad      the same with other changed                          the last line of linkrepobad, "DRIFT  other ..."
+  #     overgood / overbad are the directories the links are put into; a program that takes the directory above
+  #     the link reads these instead. Their last lines equal those of the link repos, so every start also names
+  #     the line of skill mine. Without the declarations file of the real repo, variant would be a second DRIFT.
+  #     10 starts: 2 direct, 2 through a file link in an otherwise empty directory (the measured case of the
+  #     issue), 2 through a file link inside overgood / overbad, 1 through a link with a relative target, 1 through
+  #     a link to a link, 2 through a link to the scripts/ directory.
+  local d ok='skill-drift: in step same=1 extra=0 fork=1 only-here=0 exit=0'
+  local bad='skill-drift: DRIFT drift=1 stale=0 same=0 extra=0 fork=1 only-here=0 exit=1'
+  local same='SAME   mine' why='DRIFT  mine differs=1 only-store=0 only-here=0'
+  mkdir -p "$t/lstore/mine" "$t/lstore/other" "$t/lstore/variant"
+  printf 'm1\nm2\n' > "$t/lstore/mine/SKILL.md"
+  printf 'o1\n' > "$t/lstore/other/SKILL.md"
+  printf 'generic template\n' > "$t/lstore/variant/SKILL.md"
+  mkdir -p "$t/linkrepo/skills/mine" "$t/linkrepo/skills/variant" "$t/linkrepo/scripts"
+  printf 'm1\nm2\n' > "$t/linkrepo/skills/mine/SKILL.md"
+  printf 'project variant\n' > "$t/linkrepo/skills/variant/SKILL.md"
+  printf 'variant   # project variant, the store holds the generic template\n' > "$t/linkrepo/scripts/skill-drift-declared.txt"
+  cp "$SELF" "$t/linkrepo/scripts/skill-drift.sh"
+  cp -r "$t/linkrepo" "$t/linkrepobad"
+  printf 'm1\nCHANGED\n' > "$t/linkrepobad/skills/mine/SKILL.md"
+  for d in overgood overbad; do
+    mkdir -p "$t/$d/skills/other" "$t/$d/skills/variant" "$t/$d/sub"
+    printf 'o1\n' > "$t/$d/skills/other/SKILL.md"
+    printf 'project variant\n' > "$t/$d/skills/variant/SKILL.md"
+  done
+  printf 'CHANGED\n' > "$t/overbad/skills/other/SKILL.md"
+  mkdir -p "$t/cwd" "$t/lone/sub" "$t/rel/sub" "$t/chain/sub"
+  ln -s "$t/linkrepo/scripts/skill-drift.sh" "$t/lone/sub/drift.sh"
+  ln -s "$t/linkrepobad/scripts/skill-drift.sh" "$t/lone/sub/drift-bad.sh"
+  ln -s "$t/linkrepobad/scripts/skill-drift.sh" "$t/overgood/sub/drift.sh"
+  ln -s "$t/linkrepo/scripts/skill-drift.sh" "$t/overbad/sub/drift.sh"
+  ln -s ../../linkrepobad/scripts/skill-drift.sh "$t/rel/sub/drift.sh"
+  ln -s "$t/rel/sub/drift.sh" "$t/chain/sub/drift.sh"
+  ln -s "$t/linkrepobad/scripts" "$t/overgood/scripts"
+  ln -s "$t/linkrepo/scripts" "$t/overbad/scripts"
+  link_case "11 direct start, repo in step" "$t/cwd" "$ok" "$same" "$t/linkrepo/scripts/skill-drift.sh" --store "$t/lstore" || rc=1
+  link_case "11 direct start, repo with drift" "$t/cwd" "$bad" "$why" "$t/linkrepobad/scripts/skill-drift.sh" --store "$t/lstore" || rc=1
+  link_case "11 file link in an empty directory, repo in step" "$t/cwd" "$ok" "$same" "$t/lone/sub/drift.sh" --store "$t/lstore" || rc=1
+  link_case "11 file link in an empty directory, repo with drift" "$t/cwd" "$bad" "$why" "$t/lone/sub/drift-bad.sh" --store "$t/lstore" || rc=1
+  link_case "11 file link to the repo with drift, placed inside a tree in step" "$t/cwd" "$bad" "$why" "$t/overgood/sub/drift.sh" --store "$t/lstore" || rc=1
+  link_case "11 file link to the repo in step, placed inside a tree with drift" "$t/cwd" "$ok" "$same" "$t/overbad/sub/drift.sh" --store "$t/lstore" || rc=1
+  link_case "11 file link with a relative target, repo with drift" "$t/cwd" "$bad" "$why" "$t/rel/sub/drift.sh" --store "$t/lstore" || rc=1
+  link_case "11 link to a link, repo with drift" "$t/cwd" "$bad" "$why" "$t/chain/sub/drift.sh" --store "$t/lstore" || rc=1
+  link_case "11 link to scripts/ of the repo with drift, placed inside a tree in step" "$t/cwd" "$bad" "$why" "$t/overgood/scripts/skill-drift.sh" --store "$t/lstore" || rc=1
+  link_case "11 link to scripts/ of the repo in step, placed inside a tree with drift" "$t/cwd" "$ok" "$same" "$t/overbad/scripts/skill-drift.sh" --store "$t/lstore" || rc=1
+
   rm -rf "$t"
-  [ "$rc" -eq 0 ] && echo "selftest ok (10 cases)"
+  [ "$rc" -eq 0 ] && echo "selftest ok (11 cases)"
   return "$rc"
 }
 
-ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+# issue #35: SELF is resolved, so the default root (and with it the default declarations file) is that of the repo
+# the program file belongs to, however it was started
+ROOT="$(cd -P "$(dirname "$SELF")/.." && pwd)"
 STORE="$HOME/.claude/skills"
 FORKS=""
 NAMES=()
