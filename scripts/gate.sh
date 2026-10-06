@@ -376,6 +376,21 @@ run_checks() {
       fail "README.md:${out%%:*}: git push to main (issue #16: main changes only through a merged pull request):${out#*:}"
     done < <(readme_push_main "$root/README.md")
   fi
+  # check 7, second part (issue #25): the same reader over every file install.sh copies into a project (tool_files:
+  # agents/*.md, commands/*.md, every file of a skill except its evals/). An instruction there is repeated in every
+  # session of the projects it is installed into - a wider reach than the README has. The FAIL line names the file
+  # by its path below the root.
+  # There is no exceptions file, on purpose: the readout over the tree of 2026-10-06 (scripts/gate.sh --push-main,
+  # 18 installed files) reported nothing, so there is nothing to except. A command that is right in the repo it is
+  # installed into (which push rule holds in hl_claw_bot is the open decision of issue #47) gets a declared
+  # exception - a file with one line per exception and its reason, like scripts/skill-drift-declared.txt - when
+  # the first one exists; until then such a command is reworded as a sentence or the gate stays red.
+  while IFS= read -r -d '' f; do
+    while IFS= read -r out; do
+      [ -n "$out" ] || continue
+      fail "${f#"$root"/}:${out%%:*}: git push to main in a file install.sh installs (issue #25: it is repeated in every session of the projects it is installed into):${out#*:}"
+    done < <(readme_push_main "$f")
+  done < <(tool_files "$root")
   [ "$FAILS" -eq 0 ]
 }
 
