@@ -28,12 +28,22 @@
 #      (/usr/bin/git push ...), a ref or command in single quotes, and lines that end in a carriage return (CRLF).
 #      Since issue #33 also: the command word in quotes ("git" push ..., "/usr/bin/git" push ...).
 #      Since issue #32 also: a push without a ref after a switch or checkout to main in the same indented code block
-#      (lines with four blanks or a tab in front, no fence; an empty line between them does not end the block)
+#      (lines with four blanks or a tab in front, no fence; an empty line between them does not end the block).
+#      Since issue #25 the same reader also runs over every file install.sh copies into a project: agents/*.md,
+#      commands/*.md and every file of a skill (hidden ones and symlinked ones too) except its evals/. One FAIL per
+#      command line there as well, named by the path of the file below the root. No exceptions file exists: the
+#      readout of 2026-10-06 over the 18 installed files reported nothing (see the comment at the check)
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 17 broken fixtures and pass on 8 good ones (+ 29 line cases and 135 block cases for check 7,
+#          scripts/gate.sh --selftest # proves the checks fail on 24 broken fixtures and pass on 10 good ones (+ 29 line cases and 135 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
-#          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35)
+#          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35,
+#          + 8 starts of the gate file with --push-main and 1 with --help - issue #25)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
+#          scripts/gate.sh --push-main [FILE ...]  # check 7 alone, as a readout (issue #25): one "FILE:LINE: command" line
+#          per reported command, then the last line "push-main: ok files=N" (exit 0) or "push-main: FOUND hits=K files=N"
+#          (exit 1); exit 2 and nothing read when a FILE is no readable file. Without FILE: the files check 7 reads in
+#          this repo, README.md and what install.sh installs
+#          scripts/gate.sh --help     # this header
 set -uo pipefail
 
 # Superseded header lines of the earlier state of this branch (PR #9, 4 broken + 2 good fixtures), kept as a comment
@@ -237,6 +247,79 @@ readme_push_main() {
   ' "$1"
 }
 
+# tool_files ROOT — prints, each ended by a NUL byte and sorted by byte value, the path of every file install.sh
+# copies from ROOT into a project (issue #25): agents/*.md, commands/*.md and every file of every skills/<name>/,
+# hidden ones too, except the skill's own evals/ folder. The entries of a skill are taken the way install.sh takes
+# them (three patterns, the entry named evals skipped), so an evals/ deeper inside a skill is read like install.sh
+# installs it. Not printed: scripts/, .claude/ and README.md - they are not installed.
+# A symlink to a file is printed by the path of the link, so its content is read: install.sh copies an agent or
+# command with a plain cp, which copies what the link points to, and an entry of a skill with cp -r, which copies
+# the link itself - on the machine of the install that link still leads to the same content. Not printed: a link
+# that leads to no file, and what lies behind a link to a directory (cp -r copies that link, find does not enter
+# it).
+# Superseded first form of this function (same branch, before the symlink cases toolagentlink and toolskilllink):
+# the agents and commands loop also tested [ ! -L "$f" ] and the skills loop ran find "$e" -type f -print0, so a
+# linked file was never read and a command behind it passed check 7.
+tool_files() {
+  local root="$1" f d e
+  {
+    for f in "$root"/agents/*.md "$root"/commands/*.md; do
+      [ -f "$f" ] && printf '%s\0' "$f"
+    done
+    for d in "$root"/skills/*/; do
+      [ -d "$d" ] || continue
+      for e in "$d"* "$d".[!.]* "$d"..?*; do
+        [ -e "$e" ] || continue
+        [ "$(basename "$e")" = "evals" ] && continue
+        while IFS= read -r -d '' f; do
+          [ -f "$f" ] && printf '%s\0' "$f"
+        done < <(find "$e" \( -type f -o -type l \) -print0)
+      done
+    done
+  } | LC_ALL=C sort -z
+}
+
+# push_main_readout [FILE...] — the option --push-main (issue #25): check 7 alone, as a readout. Runs
+# readme_push_main over every FILE and prints one "FILE:LINE: command" line per report (FILE as it was given), then
+# the last line "push-main: ok files=N" or "push-main: FOUND hits=K files=N". Returns 0 when nothing is reported, 1
+# when something is, 2 when a FILE is no readable file - then nothing is read, so a readout never says ok about a
+# list it read only in part.
+# Without a FILE it reads what check 7 reads in the repo this file belongs to: README.md and the files of
+# tool_files, named by their path below the repo root. Nothing to read there is exit 2 as well, not an ok.
+push_main_readout() {
+  local f out root="" strip="" hits=0 files=0
+  local -a paths=()
+  if [ "$#" -eq 0 ]; then
+    root="$(cd -P "$(dirname "$SELF")/.." && pwd)" || { echo "gate.sh: --push-main: cannot resolve the repo root" >&2; return 2; }
+    strip="$root/"
+    [ -f "$root/README.md" ] && paths+=("$root/README.md")
+    while IFS= read -r -d '' f; do paths+=("$f"); done < <(tool_files "$root")
+    [ "${#paths[@]}" -gt 0 ] || { echo "gate.sh: --push-main: no README.md and no installed file in $root" >&2; return 2; }
+  else
+    paths=("$@")
+  fi
+  for f in "${paths[@]}"; do
+    if [ ! -f "$f" ] || [ ! -r "$f" ]; then
+      echo "gate.sh: --push-main: not a readable file: ${f#"$strip"}" >&2
+      return 2
+    fi
+  done
+  for f in "${paths[@]}"; do
+    files=$((files + 1))
+    while IFS= read -r out; do
+      [ -n "$out" ] || continue
+      printf '%s:%s\n' "${f#"$strip"}" "$out"
+      hits=$((hits + 1))
+    done < <(readme_push_main "$f")
+  done
+  if [ "$hits" -eq 0 ]; then
+    echo "push-main: ok files=$files"
+    return 0
+  fi
+  echo "push-main: FOUND hits=$hits files=$files"
+  return 1
+}
+
 run_checks() {
   local root="$1" f
   FAILS=0
@@ -337,6 +420,21 @@ run_checks() {
       fail "README.md:${out%%:*}: git push to main (issue #16: main changes only through a merged pull request):${out#*:}"
     done < <(readme_push_main "$root/README.md")
   fi
+  # check 7, second part (issue #25): the same reader over every file install.sh copies into a project (tool_files:
+  # agents/*.md, commands/*.md, every file of a skill except its evals/). An instruction there is repeated in every
+  # session of the projects it is installed into - a wider reach than the README has. The FAIL line names the file
+  # by its path below the root.
+  # There is no exceptions file, on purpose: the readout over the tree of 2026-10-06 (scripts/gate.sh --push-main,
+  # 18 installed files) reported nothing, so there is nothing to except. A command that is right in the repo it is
+  # installed into (which push rule holds in hl_claw_bot is the open decision of issue #47) gets a declared
+  # exception - a file with one line per exception and its reason, like scripts/skill-drift-declared.txt - when
+  # the first one exists; until then such a command is reworded as a sentence or the gate stays red.
+  while IFS= read -r -d '' f; do
+    while IFS= read -r out; do
+      [ -n "$out" ] || continue
+      fail "${f#"$root"/}:${out%%:*}: git push to main in a file install.sh installs (issue #25: it is repeated in every session of the projects it is installed into):${out#*:}"
+    done < <(readme_push_main "$f")
+  done < <(tool_files "$root")
   [ "$FAILS" -eq 0 ]
 }
 
@@ -420,6 +518,44 @@ install_link_case() {
   if [ "$got" != "$5" ]; then
     echo "selftest FAIL: $1: installed files differ from those of the installer's own repo; got:"
     printf '    | %s\n' $got
+    return 1
+  fi
+  return 0
+}
+
+# push_main_case WHAT DIR GATE WANT_EXIT WANT_OUT [ARG...] — selftest helper (issue #25): starts the gate file GATE
+# with bash in the directory DIR as "GATE --push-main ARG...". The exit code must be WANT_EXIT and the whole output
+# (stdout and stderr together) must be WANT_OUT, line for line. Prints both and returns 1 when it does not hold.
+push_main_case() {
+  local what="$1" dir="$2" gate="$3" wantcode="$4" want="$5" out code
+  shift 5
+  out="$(cd "$dir" && bash "$gate" --push-main "$@" 2>&1)"
+  code=$?
+  if [ "$code" -ne "$wantcode" ] || [ "$out" != "$want" ]; then
+    echo "selftest FAIL: --push-main, $what: want exit $wantcode and"
+    printf '%s\n' "$want" | sed 's/^/    | /'
+    echo "  got exit $code and"
+    printf '%s\n' "$out" | sed 's/^/    | /'
+    return 1
+  fi
+  return 0
+}
+
+# tool_file_case WHAT ROOT WANT — selftest helper (check 7, issue #25): run_checks on the fixture ROOT must fail, and
+# its FAIL lines must be exactly WANT - one line that names the file below ROOT, the line and the command. So the
+# fixture is rejected by check 7 for that file and by nothing else. Prints the difference and returns 1 otherwise.
+tool_file_case() {
+  local out got
+  if out="$(run_checks "$2" 2>&1)"; then
+    echo "selftest FAIL: $1 accepted (issue #25)"
+    return 1
+  fi
+  got="$(printf '%s\n' "$out" | grep '^FAIL: ')"
+  if [ "$got" != "$3" ]; then
+    echo "selftest FAIL: $1: want exactly this FAIL line"
+    printf '%s\n' "$3" | sed 's/^/    | /'
+    echo "  got"
+    printf '%s\n' "$got" | sed 's/^/    | /'
     return 1
   fi
   return 0
@@ -836,6 +972,109 @@ EOF
   else
     echo "selftest note: the check 3 cases cwdagent and cwdagentbad skipped (no store program agent-file-check.py)"
   fi
+  # tool file cases (check 7, issue #25): the listed fixture (checks 1 to 6 green, README without a push) plus a push
+  # instruction in a file that install.sh copies into a project - there it is repeated in every session. 7 rejected
+  # (one per kind of installed file, and two that are reached through a symlink), each by exactly one FAIL line
+  # that names the file, the line and the command; 2 accepted. The fixture files: agents/a.md and skills/x/SKILL.md have 5 lines, commands/c.md has 1; an appended
+  # block starts with a blank line.
+  #   toolagent:     agents/a.md + a code block                      -> the command is line 8
+  #   toolcommand:   commands/c.md + a sentence with inline code     -> line 3
+  #   toolskill:     skills/x/SKILL.md + a block that switches to main and pushes without a ref -> the push, line 9
+  #   toolskillfile: a new file skills/x/references/flow.md          -> line 3
+  #   toolhidden:    a new hidden file skills/x/.notes.md            -> line 1
+  #   toolevals:     the same command in skills/x/evals/e.md, which install.sh does not install -> accepted
+  #   toolbranch:    agents/a.md + a push of a branch, main in prose -> accepted
+  local why25='git push to main in a file install.sh installs (issue #25: it is repeated in every session of the projects it is installed into)'
+  cp -r "$t/listed" "$t/toolagent"
+  printf '\n```bash\ngit push origin main\n```\n' >> "$t/toolagent/agents/a.md"
+  tool_file_case "agent file with 'git push origin main'" "$t/toolagent" "FAIL: agents/a.md:8: $why25: git push origin main" || rc=1
+  cp -r "$t/listed" "$t/toolcommand"
+  printf '\nThen run `git push origin HEAD:main`.\n' >> "$t/toolcommand/commands/c.md"
+  tool_file_case "command file with 'git push origin HEAD:main' as inline code" "$t/toolcommand" "FAIL: commands/c.md:3: $why25: Then run \`git push origin HEAD:main\`." || rc=1
+  cp -r "$t/listed" "$t/toolskill"
+  printf '\n```bash\ngit switch main\ngit push\n```\n' >> "$t/toolskill/skills/x/SKILL.md"
+  tool_file_case "SKILL.md with 'git switch main' + 'git push' in one block" "$t/toolskill" "FAIL: skills/x/SKILL.md:9: $why25: git push" || rc=1
+  cp -r "$t/listed" "$t/toolskillfile"
+  mkdir -p "$t/toolskillfile/skills/x/references"
+  printf '# flow\n\ngit push --all\n' > "$t/toolskillfile/skills/x/references/flow.md"
+  tool_file_case "file in a folder of a skill with 'git push --all'" "$t/toolskillfile" "FAIL: skills/x/references/flow.md:3: $why25: git push --all" || rc=1
+  cp -r "$t/listed" "$t/toolhidden"
+  printf 'git push -u origin feat/x:main\n' > "$t/toolhidden/skills/x/.notes.md"
+  tool_file_case "hidden file of a skill with 'git push -u origin feat/x:main'" "$t/toolhidden" "FAIL: skills/x/.notes.md:1: $why25: git push -u origin feat/x:main" || rc=1
+  #   toolagentlink: agents/a.md is a symlink to shared/a.md, a file outside agents/ that carries the command.
+  #                  install.sh copies agents and commands with a plain cp, which copies what a link points to, so
+  #                  the content reaches the project -> rejected, named by the path of the link, line 8
+  #   toolskilllink: skills/x/more.md is a symlink (absolute target) to a file outside the skill that carries the
+  #                  command. install.sh copies the entries of a skill with cp -r, which copies the link itself; on
+  #                  the machine of the install the link still leads to that content -> rejected, line 1
+  cp -r "$t/listed" "$t/toolagentlink"
+  mkdir -p "$t/toolagentlink/shared"
+  mv "$t/toolagentlink/agents/a.md" "$t/toolagentlink/shared/a.md"
+  printf '\n```bash\ngit push origin main\n```\n' >> "$t/toolagentlink/shared/a.md"
+  ln -s ../shared/a.md "$t/toolagentlink/agents/a.md"
+  tool_file_case "agent file that is a symlink to a file with 'git push origin main'" "$t/toolagentlink" "FAIL: agents/a.md:8: $why25: git push origin main" || rc=1
+  cp -r "$t/listed" "$t/toolskilllink"
+  mkdir -p "$t/toolskilllink/shared"
+  printf 'git push origin main\n' > "$t/toolskilllink/shared/more.md"
+  ln -s "$t/toolskilllink/shared/more.md" "$t/toolskilllink/skills/x/more.md"
+  tool_file_case "symlink inside a skill to a file with 'git push origin main'" "$t/toolskilllink" "FAIL: skills/x/more.md:1: $why25: git push origin main" || rc=1
+  cp -r "$t/listed" "$t/toolevals"
+  mkdir -p "$t/toolevals/skills/x/evals"
+  printf 'git push origin main\n' > "$t/toolevals/skills/x/evals/e.md"
+  out="$(run_checks "$t/toolevals" 2>&1)" || {
+    echo "selftest FAIL: 'git push origin main' in a skill's evals/ (not installed) rejected:"
+    printf '%s\n' "$out"
+    rc=1
+  }
+  cp -r "$t/listed" "$t/toolbranch"
+  printf '\nThe change reaches `main` through a pull request, never by a push to `main`:\n\n```bash\ngit push -u origin feat/x\n```\n' >> "$t/toolbranch/agents/a.md"
+  out="$(run_checks "$t/toolbranch" 2>&1)" || {
+    echo "selftest FAIL: agent file with 'git push -u origin feat/x' rejected:"
+    printf '%s\n' "$out"
+    rc=1
+  }
+  # option cases (issue #25): the gate file itself, started with --push-main - check 7 alone, as a readout. One
+  # "FILE:LINE: command" line per report, then a last line with the counts; exit 0 nothing reported, 1 reported,
+  # 2 a FILE that is no readable file (nothing is read then). The whole output is compared, line for line.
+  #   pm/hit.md:   a push to main at line 3
+  #   pm/two.md:   one at line 1 and a wrapped one that starts at line 5
+  #   pm/clean.md: a push of a branch, and main in prose only
+  #   pm/sub/:     a directory - no file; also the empty directory the starts without a FILE are made in
+  #   pmrepo / pmrepobad: the good fixture plus scripts/ with a copy of this file, for the start without a FILE. It
+  #                reads README.md and what install.sh installs from the repo the gate file belongs to, wherever it
+  #                is started. pmrepobad carries a push to main in skills/x/references/flow.md (installed, so it is
+  #                reported) and in skills/x/evals/e.md (not installed, so it is not read and not counted)
+  # 8 starts with --push-main: 3 with files that can be read (one with a report, one without, three files in one
+  # start), 3 with a FILE that is none (missing, missing next to one with a report, a directory), 2 without a FILE
+  # (pmrepo, pmrepobad). Then 1 start with --help: exit 0, the header from its first line on, the option named in it.
+  local helpout
+  mkdir -p "$t/pm/sub"
+  printf '# f\n\ngit push origin main\n' > "$t/pm/hit.md"
+  printf 'git push origin HEAD:main\n\n```bash\ngit fetch origin\ngit push -u origin \\\n  main\n```\n' > "$t/pm/two.md"
+  printf 'The change reaches `main` through a pull request, never by a push to `main`:\n\n```bash\ngit push -u origin feat/x\n```\n' > "$t/pm/clean.md"
+  push_main_case "one file with a push to main" "$t/pm" "$SELF" 1 \
+    $'hit.md:3: git push origin main\npush-main: FOUND hits=1 files=1' hit.md || rc=1
+  push_main_case "one file without one" "$t/pm" "$SELF" 0 'push-main: ok files=1' clean.md || rc=1
+  push_main_case "three files, three reports in two of them" "$t/pm" "$SELF" 1 \
+    $'hit.md:3: git push origin main\ntwo.md:1: git push origin HEAD:main\ntwo.md:5: git push -u origin main\npush-main: FOUND hits=3 files=3' clean.md hit.md two.md || rc=1
+  push_main_case "a FILE that does not exist" "$t/pm" "$SELF" 2 'gate.sh: --push-main: not a readable file: nope.md' nope.md || rc=1
+  push_main_case "a FILE that does not exist next to one with a report" "$t/pm" "$SELF" 2 \
+    'gate.sh: --push-main: not a readable file: nope.md' hit.md nope.md || rc=1
+  push_main_case "a directory as FILE" "$t/pm" "$SELF" 2 'gate.sh: --push-main: not a readable file: sub' sub || rc=1
+  cp -r "$t/good" "$t/pmrepo"
+  mkdir -p "$t/pmrepo/scripts"
+  cp "$SELF" "$t/pmrepo/scripts/gate.sh"
+  cp -r "$t/pmrepo" "$t/pmrepobad"
+  mkdir -p "$t/pmrepobad/skills/x/references" "$t/pmrepobad/skills/x/evals"
+  printf '# flow\n\ngit push origin main\n' > "$t/pmrepobad/skills/x/references/flow.md"
+  printf 'git push origin main\n' > "$t/pmrepobad/skills/x/evals/e.md"
+  push_main_case "no FILE, a repo without a push to main" "$t/pm/sub" "$t/pmrepo/scripts/gate.sh" 0 'push-main: ok files=4' || rc=1
+  push_main_case "no FILE, a repo with one in an installed skill file and one in evals/" "$t/pm/sub" "$t/pmrepobad/scripts/gate.sh" 1 \
+    $'skills/x/references/flow.md:3: git push origin main\npush-main: FOUND hits=1 files=5' || rc=1
+  helpout="$(cd "$t/pm/sub" && bash "$SELF" --help 2>&1)" || { echo "selftest FAIL: --help does not end with exit 0"; rc=1; }
+  [ "${helpout%%$'\n'*}" = "gate.sh — offline gate for tgc-dev-tools (fleet board gate, routing[\"gates\"])." ] || {
+    echo "selftest FAIL: --help does not start with the first line of the header, but with: ${helpout%%$'\n'*}"; rc=1; }
+  printf '%s\n' "$helpout" | grep -q -F -- 'scripts/gate.sh --push-main [FILE ...]' || { echo "selftest FAIL: --help does not name --push-main [FILE ...]"; rc=1; }
   # link cases (issue #29): the gate file itself, started with bash in an empty directory, directly and through
   # symlinks - the last line and the exit code are those of the repo the file belongs to, never of the directory
   # above the link.
@@ -908,6 +1147,11 @@ EOF
 }
 
 if [ "${1:-}" = "--selftest" ]; then selftest; exit $?; fi
+# issue #25: the header of this file as the usage text, and check 7 alone as a readout
+case "${1:-}" in
+  -h|--help) awk 'NR>1 && /^#/{sub(/^# ?/, ""); print; next} NR>1{exit}' "$SELF"; exit 0 ;;
+  --push-main) shift; push_main_readout "$@"; exit $? ;;
+esac
 # issue #29: SELF is resolved, so this is the repo the program file belongs to, however the gate was started
 ROOT="$(cd -P "$(dirname "$SELF")/.." && pwd)"
 if run_checks "$ROOT"; then echo "gate: ok"; else echo "gate: FAILED"; exit 1; fi
