@@ -28,7 +28,13 @@ item concerns a skill, compare both and say which is canonical in the PR; never 
 **Boundaries:**
 - Touch only your item. Never delete files (comment out or mark superseded). Edits via the Edit tool, no `sed`.
 - Never run the install script against `~/.claude` or another repo's `.claude` - only into a temp dir for checks.
-- No live trading API, no VPS access, no deploy, no `rescue-bot` command. `~/.claude/scripts` is never edited.
+- No live trading API, no VPS access, no deploy, no `rescue-bot` command. `~/.claude/scripts` is never edited —
+  **one exception (user, 2026-10-06): you do the store intake of your own scripts yourself:** after the push
+  `~/.claude/scripts/dev/script-intake.py add --repo <main checkout> --path <path> --ref origin/<your branch> --lang …
+  --keywords … --purpose …` (append-only), then `script-intake.py check` green. Intake is no longer a gate.
+- **Decide yourself (user, 2026-10-06):** when the issue or the order names a default or recommended option, take it,
+  write the decision as an issue comment and `--lernen`, and build on. `add-gate` only when no option exists without
+  money, legal effect, keys/access, or outward effect (another repo's `.claude`, live system, publishing).
 - No ad-hoc code (`python3 -c`, heredocs): a readout becomes a file under `scripts/` with header docstring and
   `--selftest`.
 - No secrets in output. Other repos (hl_claw_bot, hl_game_backend, tgc-*) are not touched.
