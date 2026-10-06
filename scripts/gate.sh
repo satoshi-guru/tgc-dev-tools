@@ -32,7 +32,9 @@
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
 #          scripts/gate.sh --selftest # proves the checks fail on 17 broken fixtures and pass on 8 good ones (+ 29 line cases and 135 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
-#          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35)
+#          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35,
+#          + 4 starts of install.sh in a source without agents/, commands/ or skills/, each with a destination that
+#          must not exist afterwards - issue #45)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 set -uo pipefail
 
@@ -423,6 +425,36 @@ install_link_case() {
     return 1
   fi
   return 0
+}
+
+# install_nosource_case WHAT DIR SRC DEST MISSING — selftest helper (issue #45): starts the installer file
+# SRC/install.sh with bash in the directory DIR, with the destination DEST. SRC lacks the folders MISSING (as the
+# installer names them, say "agents/, commands/, skills/"), and neither DEST nor the directory above it exists.
+# Wanted: exit 1, exactly one line of output - the one that names SRC and MISSING and ends with
+# "(nothing installed)" - and afterwards neither DEST nor the directory above it exists. Before issue #45 the
+# installer made DEST/agents, DEST/commands and DEST/skills first and then stopped with a cp error on its source.
+# Prints what differs and returns 1 when it does not hold.
+install_nosource_case() {
+  local out code src want bad=0
+  src="$(cd -P "$3" && pwd)"
+  want="install.sh: not a checkout of tgc-dev-tools: no $5 in $src (nothing installed)"
+  out="$(cd "$2" && bash "$3/install.sh" "$4" 2>&1)"
+  code=$?
+  if [ "$code" -ne 1 ]; then
+    echo "selftest FAIL: $1: exit $code, want 1"
+    bad=1
+  fi
+  if [ "$out" != "$want" ]; then
+    echo "selftest FAIL: $1: want the one line '$want', got:"
+    printf '%s\n' "$out" | while IFS= read -r line; do printf '    | %s\n' "$line"; done
+    bad=1
+  fi
+  if [ -e "$4" ] || [ -e "$(dirname "$4")" ]; then
+    echo "selftest FAIL: $1: the destination exists after an install that failed; it holds:"
+    find "$(dirname "$4")" | LC_ALL=C sort | while IFS= read -r line; do printf '    | %s\n' "$line"; done
+    bad=1
+  fi
+  return "$bad"
 }
 
 selftest() {
@@ -902,6 +934,29 @@ EOF
   install_link_case "installer, file link with a relative target" "$t/cwd" "$t/rel/sub/install.sh" "$t/instdest/rel/.claude" "$inst" || rc=1
   install_link_case "installer, link to a link" "$t/cwd" "$t/chain/sub/install.sh" "$t/instdest/chain/.claude" "$inst" || rc=1
   install_link_case "installer, link to the repo directory" "$t/cwd" "$t/instdir/repo/install.sh" "$t/instdest/dir/.claude" "$inst" || rc=1
+  # installer source cases (issue #45): install.sh of this repo in a directory that is not a checkout of it,
+  # started with bash in an empty directory, each time with a destination below the temp dir that does not exist.
+  # Every start ends with exit 1 and one line that names the source and what it lacks, and the destination still
+  # does not exist afterwards (before, the installer had already made agents/, commands/ and skills/ in it).
+  #   nosrc/none:     a copy of install.sh alone in a directory - the measured case of the issue
+  #   nosrc/agents:   the good fixture's commands/ and skills/ beside it, no agents/
+  #   nosrc/commands: the good fixture's agents/ and skills/ beside it, no commands/ (before, a.md was installed
+  #                   and then the install stopped)
+  #   nosrc/skills:   the good fixture's agents/ and commands/ beside it, no skills/
+  # 4 starts: 1 with none of the three folders, 3 with exactly one of them missing.
+  local srcinst miss keep
+  srcinst="$(dirname "$SELF")/../install.sh"
+  mkdir -p "$t/nosrc/none"
+  cp "$srcinst" "$t/nosrc/none/install.sh"
+  install_nosource_case "installer alone in a directory" "$t/cwd" "$t/nosrc/none" "$t/nosrcdest/none/.claude" "agents/, commands/, skills/" || rc=1
+  for miss in agents commands skills; do
+    mkdir -p "$t/nosrc/$miss"
+    cp "$srcinst" "$t/nosrc/$miss/install.sh"
+    for keep in agents commands skills; do
+      [ "$keep" = "$miss" ] || cp -r "$t/good/$keep" "$t/nosrc/$miss/$keep"
+    done
+    install_nosource_case "installer in a source without $miss/" "$t/cwd" "$t/nosrc/$miss" "$t/nosrcdest/$miss/.claude" "$miss/" || rc=1
+  done
   rm -rf "$t"
   [ "$rc" -eq 0 ] && echo "selftest ok"
   return "$rc"
