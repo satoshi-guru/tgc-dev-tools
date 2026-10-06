@@ -123,5 +123,5 @@ P1 fixes applied: <list of Gemini bugs fixed during port>
 - Never `git merge game-backend` or cherry-pick — always manual extraction
 - Never edit files in `hl_game_backend` — it's Gemini's sandbox, read-only for us
 - Never commit broken tests — fix or skip with documented reason
-- Never push autonomously — commit+push then wait for explicit go-ahead
+- Never push autonomously — commit, then wait for the explicit go-ahead before any push
 - If a feature has >5 files, split into multiple commits by logical chunk
