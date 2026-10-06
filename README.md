@@ -410,7 +410,25 @@ What it checks:
    (`git push -u origin feat/x`, also `maintenance` or `feat/main-menu`), a switch to `main` that is followed by a
    pull and no push (step 3 of "Update Workflow"), and prose without the command. The check reads the command, not
    the sentence around it: a quoted push to `main` is rejected even after a "never", so describe the rule in words
-   instead. What it still does not see is listed in the comment above `readme_push_main` in `scripts/gate.sh`
+   instead. What it still does not see is listed in the comment above `readme_push_main` in `scripts/gate.sh`.
+   Since issue #25 the same check also reads every file `install.sh` copies into a project — `agents/*.md`,
+   `commands/*.md` and every file of a skill (hidden ones and symlinked ones too) except its `evals/` — and
+   reports `FAIL: <file>:<line>: …` with the path of the file. An instruction in one of those files is repeated in
+   every session of the projects it is installed into, so the same wording rule holds there: describe a push rule
+   in words, do not quote the command with its target. There is no exceptions file, because nothing needed one
+   (2026-10-06: 0 reports in 18 installed files); a command that is right in the repo it is installed into gets a
+   declared exception when the first one exists
+
+Check 7 can be run on its own, as a readout that changes nothing:
+
+```bash
+scripts/gate.sh --push-main                    # README.md and every installed file of this repo
+scripts/gate.sh --push-main agents/*.md        # only the files named
+scripts/gate.sh --help                         # the header of the gate file as usage text
+```
+
+One `FILE:LINE: command` line per report, then the last line `push-main: ok files=N` (exit 0) or
+`push-main: FOUND hits=K files=N` (exit 1). A FILE that is no readable file ends with exit 2 and nothing is read.
 
 `scripts/readme-listing-check.sh` can be run on its own. It compares the tree in "What's Inside" and the `###`
 headings with `agents/`, `commands/`, `skills/` on disk, in both directions:
