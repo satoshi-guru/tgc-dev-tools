@@ -196,6 +196,9 @@ selftest() {
   [ "${out##*$'\n'}" = "install-status: in step same=4 extra=3" ] || { echo "selftest FAIL: extras, got: ${out##*$'\n'}"; rc=1; }
   printf '%s\n' "$out" | grep -q -x "EXTRA    commands/y.md (this repo has a skill of that name: skills/y/)" || { echo "selftest FAIL: no same-name hint"; rc=1; }
   printf '%s\n' "$out" | grep -q -x "    only there: notes.md (install.sh keeps it)" || { echo "selftest FAIL: no only-there line"; rc=1; }
+  # Superseded (the WARN line became a NOTE, see the two assertions below); the older assertion of this branch,
+  # kept as a comment when main was merged in:
+  #   printf '%s\n' "$out" | grep -q "^WARN     skills/x/evals/ exists there" || { echo "selftest FAIL: no evals warning"; rc=1; }
   printf '%s\n' "$out" | grep -q -x "NOTE     skills/x/evals/ exists there - install.sh leaves that folder as it was" || { echo "selftest FAIL: no evals note"; rc=1; }
   printf '%s\n' "$out" | grep -q "would remove that folder" && { echo "selftest FAIL: the report still says install.sh would remove evals/"; rc=1; }
 

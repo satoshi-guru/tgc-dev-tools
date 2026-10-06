@@ -34,6 +34,11 @@
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 set -uo pipefail
 
+# Superseded header lines of the earlier state of this branch (PR #9, 4 broken + 2 good fixtures), kept as a comment
+# when main was merged in. The header above is the valid one; these two lines are no usage text:
+#   Usage:  scripts/gate.sh            # run from anywhere; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
+#            scripts/gate.sh --selftest # proves the checks fail on 4 broken fixtures and pass on 2 good ones
+
 # real_path FILE — absolute path of FILE with every symlink resolved (issue #29): a link to the file by readlink (a
 # chain of at most 40 links, relative targets read from the link's own directory), a link in the directory part by
 # cd -P. Only bash and readlink, so it does not depend on realpath or on readlink -f being there.
@@ -428,6 +433,9 @@ selftest() {
   cp -r "$t/good" "$t/default"
   printf 'DEST="${1:-/nonexistent/.claude}"\n' >> "$t/default/install.sh"
   run_checks "$t/default" >/dev/null && { echo "selftest FAIL: default destination accepted"; rc=1; }
+  # Superseded by the tamper block below (same fixture, and the reason for the rejection is asserted too); the older
+  # assertion of this branch, kept as a comment when main was merged in:
+  #   run_checks "$t/tamper" >/dev/null && { echo "selftest FAIL: altered install accepted"; rc=1; }
   # tamper: good fixture whose install.sh installs every file but alters one agent -> the counts match and the
   # skills are complete, the content is not what the source has -> rejected, and for that reason (check 4, issue #6)
   cp -r "$t/good" "$t/tamper"
