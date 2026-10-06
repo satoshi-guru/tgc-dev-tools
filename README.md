@@ -26,6 +26,7 @@ tgc-dev-tools/
 │   └── design-review/          # Design partner: design + pressure-test code BEFORE you build it
 ├── scripts/
 │   ├── gate.sh                 # Offline gate for this repo (not installed) — see "Gate"
+│   ├── install-status.sh       # Is a project's .claude in step with this repo? Read-only — see "Installed state"
 │   ├── readme-listing-check.sh # Does this README list every agent, command, skill and script?
 │   ├── link-start-probe.sh     # Does a program answer the same when started through a symlink? — see "Gate"
 │   ├── skill-drift.sh          # Do the skills here still match ~/.claude/skills? — see "Skills that also exist…"
@@ -79,6 +80,53 @@ with the versions from this repo. Since issue #3 that is harmless for `session-i
 would replace the generic `start-coding-session` template of every other project with the hl_claw_bot variant and
 append the superseded block to the global `llmdoc/PRESETS.md`. Run `scripts/skill-drift.sh` first and read what it
 lists.
+
+### Installed state
+
+Because the installed copies are untracked, nothing in `git status` of a target repo shows that it is behind.
+`scripts/install-status.sh` is the check. It only reads the destination and compares by name **and** content:
+
+```bash
+scripts/install-status.sh /home/rootvault/Dokumente/hl_claw_bot/.claude      # exit 0 in step · 1 behind · 2 usage
+scripts/install-status.sh /home/rootvault/Dokumente/hl_game_backend/.claude
+scripts/install-status.sh --rehearse /path/to/project/.claude                # what would an install change?
+scripts/install-status.sh --selftest                                         # 8 cases on temp fixtures
+```
+
+One line per tool, then `install-status: in step same=S extra=E` or
+`install-status: BEHIND missing=M differs=D same=S extra=E`:
+
+- `SAME` — installed, every file identical.
+- `MISSING` — not installed; `install.sh` would add it.
+- `DIFFERS` — installed with other content; `install.sh` would **overwrite** it. The differing files are listed with
+  the date of the last commit here and the modification date there, so you can see which side is newer before you
+  install. Look at the difference with `diff -r skills/<name> <destination>/skills/<name>`.
+- `EXTRA` — in the destination but not from this repo (a project's own agents, the board role files `bb-*`);
+  `install.sh` leaves it alone.
+- `NOTE` — a destination skill carries an `evals/` folder; `install.sh` leaves that folder as it was (until issue #8
+  it removed it). Not a gap, not counted.
+
+`--rehearse` copies the destination's `agents/`, `commands/` and `skills/` into a temp dir, runs `install.sh` into
+that copy and prints the status before and after. The real destination is not written.
+
+Start the program by its real path: through a symlink it looks for the repo above the link and ends with exit 2
+(issue #43, the class of issue #35).
+
+State measured on 2026-10-06 (read-only, `main` at `dcffc30` plus this program; issue #6). The gap is open:
+
+| Destination | Result | Missing | Differs (an install overwrites) | Extra (not from this repo) |
+|---|---|---|---|---|
+| `hl_claw_bot/.claude` | `BEHIND missing=3 differs=2 same=7 extra=4` | skills `design-review`, `llmdoc`, `session-init` | agent `code-porter`, skill `port-feature` (`SKILL.md`) — here changed 2026-10-06, there from 2026-05-24 | agents `bb-bauer`, `bb-pruefer`, `bb-verifikation`; command `start-coding-session.md` |
+| `hl_game_backend/.claude` | `BEHIND missing=11 differs=0 same=1 extra=7` | everything except command `rescue-bot` | — | agents `bb-bauer`, `bb-pruefer`, `bb-verifikation`, `game-builder`, `game-designer`, `game-validator`, `isekai-storyteller` |
+
+The table is a dated measurement, not a standing fact — run the program for today's state. On 2026-10-03 the first
+row read `differs=0 same=9`; the two files that differ now were changed here since (issue #38), so sessions in
+`hl_claw_bot` still run the older `code-porter` and `/port-feature`. Whether `hl_game_backend` should get the full
+set is an open decision of the repo owner (issue #6) — this README does not claim that any tool is left out on
+purpose. The three skills missing in `hl_claw_bot` also exist in `~/.claude/skills/`, so a session there already
+loads the global copy of those names, and an install adds a project copy that the global one overrides (next
+section). `hl_claw_bot/.claude/commands/start-coding-session.md` does not come from this repo (here
+`start-coding-session` is a skill); an install neither updates nor removes it.
 
 ---
 
@@ -323,7 +371,9 @@ What it checks:
    absent). The checker looks up the paths an agent file names in its working directory, so the gate starts it in
    the repo root — the result is the same wherever the gate itself is started from (issue #21)
 4. `install.sh` into a temp dir installs every agent, command and skill dir (counts match), copies every entry of
-   a skill (hidden ones too) except its `evals/`, and leaves an `evals/` folder the destination already had as it was
+   a skill (hidden ones too) except its `evals/`, and leaves an `evals/` folder the destination already had as it was.
+   The fresh install is also in step with the source file by file, agents and commands included
+   (`scripts/install-status.sh`, see "Installed state")
 5. `install.sh` has no default destination (read statically — the gate never runs it without a destination)
 6. This README lists every agent, command, skill and script — via `scripts/readme-listing-check.sh`
 7. This README carries no `git push` command whose target is `main` (issues #16, #18) — one
@@ -391,6 +441,10 @@ gh pr create --base main --head feat/gemini-review-pattern-n
 git switch main && git pull --ff-only origin main
 ./install.sh /home/rootvault/Dokumente/hl_claw_bot/.claude
 ./install.sh /home/rootvault/Dokumente/hl_game_backend/.claude
+
+# 4. Confirm each project is in step (read-only; last line "install-status: in step …", exit 0)
+scripts/install-status.sh /home/rootvault/Dokumente/hl_claw_bot/.claude
+scripts/install-status.sh /home/rootvault/Dokumente/hl_game_backend/.claude
 ```
 
 That's the full loop. `main` changes only through a merged pull request: the branch is pushed, `main` is not, and

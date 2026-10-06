@@ -14,7 +14,9 @@
 #      directory (issue #21: started elsewhere, the gate was red on a good tree or green on a broken one)
 #   4. install.sh into a temp dir installs every agent, command and skill dir of this repo (counts match),
 #      copies every entry of a skill (hidden ones too) except its evals/, and leaves an evals/ folder that a
-#      destination already had as it was (issue #8)
+#      destination already had as it was (issue #8). The fresh install is also in step with the source file by
+#      file, agents and commands included (scripts/install-status.sh, issue #6; skipped with a note if that
+#      program is not next to this file)
 #   5. install.sh has no default destination (static read of the file; the gate never runs it without one)
 #   6. README.md lists every agent, command, skill and script (scripts/readme-listing-check.sh; a root without
 #      README.md does not get this far since issue #29, check 0)
@@ -26,7 +28,7 @@
 #      (/usr/bin/git push ...), a ref or command in single quotes, and lines that end in a carriage return (CRLF).
 #      Since issue #33 also: the command word in quotes ("git" push ..., "/usr/bin/git" push ...)
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 15 broken fixtures and pass on 7 good ones (+ 29 line cases and 109 block cases for check 7,
+#          scripts/gate.sh --selftest # proves the checks fail on 16 broken fixtures and pass on 7 good ones (+ 29 line cases and 109 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 set -uo pipefail
@@ -243,6 +245,19 @@ run_checks() {
       w="$(find "$root/agents" -maxdepth 1 -name '*.md' | wc -l)/$(find "$root/commands" -maxdepth 1 -name '*.md' | wc -l)/$(find "$root/skills" -mindepth 1 -maxdepth 1 -type d | wc -l)"
       g="$(find "$tmp/dest/agents" -maxdepth 1 -name '*.md' | wc -l)/$(find "$tmp/dest/commands" -maxdepth 1 -name '*.md' | wc -l)/$(find "$tmp/dest/skills" -mindepth 1 -maxdepth 1 -type d | wc -l)"
       [ "$w" = "$g" ] || fail "install.sh counts agents/commands/skills want $w got $g"
+      # issue #6: counts alone do not prove content - the fresh install must be in step with the source file by
+      # file, agents and commands included (the diff below reads skills/ only). install-status.sh is read from the
+      # directory of this file; a gate file that stands alone says so instead of passing in silence.
+      local stater
+      stater="$(dirname "$SELF")/install-status.sh"
+      if [ -f "$stater" ]; then
+        if ! out="$(bash "$stater" --source "$root" "$tmp/dest" 2>&1)"; then
+          fail "fresh install is not in step with the source (scripts/install-status.sh)"
+          printf '%s\n' "$out"
+        fi
+      else
+        echo "note: install-status skipped (no install-status.sh next to gate.sh)"
+      fi
       # issue #8 — what the counts do not see. Fresh destination: every entry of a skill arrives (hidden ones
       # too) except its evals/. Destination that already holds skills/<name>/evals/own.json for every skill:
       # after the install each own.json is still there and nothing was added next to it.
@@ -390,6 +405,13 @@ selftest() {
   cp -r "$t/good" "$t/default"
   printf 'DEST="${1:-/nonexistent/.claude}"\n' >> "$t/default/install.sh"
   run_checks "$t/default" >/dev/null && { echo "selftest FAIL: default destination accepted"; rc=1; }
+  # tamper: good fixture whose install.sh installs every file but alters one agent -> the counts match and the
+  # skills are complete, the content is not what the source has -> rejected, and for that reason (check 4, issue #6)
+  cp -r "$t/good" "$t/tamper"
+  printf 'printf "altered\\n" >> "$DEST/agents/a.md"\n' >> "$t/tamper/install.sh"
+  out0="$(run_checks "$t/tamper" 2>&1)" && { echo "selftest FAIL: altered install accepted"; rc=1; }
+  printf '%s\n' "$out0" | grep -q -x 'FAIL: fresh install is not in step with the source (scripts/install-status.sh)' || { echo "selftest FAIL: tamper not rejected for the altered file"; rc=1; }
+  printf '%s\n' "$out0" | grep -q -x 'DIFFERS  agents/a.md' || { echo "selftest FAIL: tamper output does not name the altered file"; rc=1; }
   # withevals: good fixture whose skill carries evals/ and a hidden entry -> accepted; a fresh install of it has
   # the hidden entry and no evals/ (check 4, issue #8)
   local out
