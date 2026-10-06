@@ -482,6 +482,26 @@ push_main_case() {
   return 0
 }
 
+# tool_file_case WHAT ROOT WANT — selftest helper (check 7, issue #25): run_checks on the fixture ROOT must fail, and
+# its FAIL lines must be exactly WANT - one line that names the file below ROOT, the line and the command. So the
+# fixture is rejected by check 7 for that file and by nothing else. Prints the difference and returns 1 otherwise.
+tool_file_case() {
+  local out got
+  if out="$(run_checks "$2" 2>&1)"; then
+    echo "selftest FAIL: $1 accepted (issue #25)"
+    return 1
+  fi
+  got="$(printf '%s\n' "$out" | grep '^FAIL: ')"
+  if [ "$got" != "$3" ]; then
+    echo "selftest FAIL: $1: want exactly this FAIL line"
+    printf '%s\n' "$3" | sed 's/^/    | /'
+    echo "  got"
+    printf '%s\n' "$got" | sed 's/^/    | /'
+    return 1
+  fi
+  return 0
+}
+
 selftest() {
   local t rc=0
   t="$(mktemp -d)"
@@ -842,6 +862,50 @@ EOF
   else
     echo "selftest note: the check 3 cases cwdagent and cwdagentbad skipped (no store program agent-file-check.py)"
   fi
+  # tool file cases (check 7, issue #25): the listed fixture (checks 1 to 6 green, README without a push) plus a push
+  # instruction in a file that install.sh copies into a project - there it is repeated in every session. 5 rejected,
+  # one per kind of installed file, each by exactly one FAIL line that names the file, the line and the command;
+  # 2 accepted. The fixture files: agents/a.md and skills/x/SKILL.md have 5 lines, commands/c.md has 1; an appended
+  # block starts with a blank line.
+  #   toolagent:     agents/a.md + a code block                      -> the command is line 8
+  #   toolcommand:   commands/c.md + a sentence with inline code     -> line 3
+  #   toolskill:     skills/x/SKILL.md + a block that switches to main and pushes without a ref -> the push, line 9
+  #   toolskillfile: a new file skills/x/references/flow.md          -> line 3
+  #   toolhidden:    a new hidden file skills/x/.notes.md            -> line 1
+  #   toolevals:     the same command in skills/x/evals/e.md, which install.sh does not install -> accepted
+  #   toolbranch:    agents/a.md + a push of a branch, main in prose -> accepted
+  local why25='git push to main in a file install.sh installs (issue #25: it is repeated in every session of the projects it is installed into)'
+  cp -r "$t/listed" "$t/toolagent"
+  printf '\n```bash\ngit push origin main\n```\n' >> "$t/toolagent/agents/a.md"
+  tool_file_case "agent file with 'git push origin main'" "$t/toolagent" "FAIL: agents/a.md:8: $why25: git push origin main" || rc=1
+  cp -r "$t/listed" "$t/toolcommand"
+  printf '\nThen run `git push origin HEAD:main`.\n' >> "$t/toolcommand/commands/c.md"
+  tool_file_case "command file with 'git push origin HEAD:main' as inline code" "$t/toolcommand" "FAIL: commands/c.md:3: $why25: Then run \`git push origin HEAD:main\`." || rc=1
+  cp -r "$t/listed" "$t/toolskill"
+  printf '\n```bash\ngit switch main\ngit push\n```\n' >> "$t/toolskill/skills/x/SKILL.md"
+  tool_file_case "SKILL.md with 'git switch main' + 'git push' in one block" "$t/toolskill" "FAIL: skills/x/SKILL.md:9: $why25: git push" || rc=1
+  cp -r "$t/listed" "$t/toolskillfile"
+  mkdir -p "$t/toolskillfile/skills/x/references"
+  printf '# flow\n\ngit push --all\n' > "$t/toolskillfile/skills/x/references/flow.md"
+  tool_file_case "file in a folder of a skill with 'git push --all'" "$t/toolskillfile" "FAIL: skills/x/references/flow.md:3: $why25: git push --all" || rc=1
+  cp -r "$t/listed" "$t/toolhidden"
+  printf 'git push -u origin feat/x:main\n' > "$t/toolhidden/skills/x/.notes.md"
+  tool_file_case "hidden file of a skill with 'git push -u origin feat/x:main'" "$t/toolhidden" "FAIL: skills/x/.notes.md:1: $why25: git push -u origin feat/x:main" || rc=1
+  cp -r "$t/listed" "$t/toolevals"
+  mkdir -p "$t/toolevals/skills/x/evals"
+  printf 'git push origin main\n' > "$t/toolevals/skills/x/evals/e.md"
+  out="$(run_checks "$t/toolevals" 2>&1)" || {
+    echo "selftest FAIL: 'git push origin main' in a skill's evals/ (not installed) rejected:"
+    printf '%s\n' "$out"
+    rc=1
+  }
+  cp -r "$t/listed" "$t/toolbranch"
+  printf '\nThe change reaches `main` through a pull request, never by a push to `main`:\n\n```bash\ngit push -u origin feat/x\n```\n' >> "$t/toolbranch/agents/a.md"
+  out="$(run_checks "$t/toolbranch" 2>&1)" || {
+    echo "selftest FAIL: agent file with 'git push -u origin feat/x' rejected:"
+    printf '%s\n' "$out"
+    rc=1
+  }
   # option cases (issue #25): the gate file itself, started with --push-main - check 7 alone, as a readout. One
   # "FILE:LINE: command" line per report, then a last line with the counts; exit 0 nothing reported, 1 reported,
   # 2 a FILE that is no readable file (nothing is read then). The whole output is compared, line for line.
