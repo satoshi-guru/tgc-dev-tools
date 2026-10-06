@@ -6,15 +6,16 @@
 #   DIFFERS  present there, but a file differs or is missing -> install.sh would overwrite/add it (files listed)
 #   MISSING  not there                                        -> install.sh would add it
 #   EXTRA    in the destination's agents/, commands/ or skills/ but not from this repo -> install.sh leaves it alone
-#   WARN     the destination skill carries an evals/ folder   -> install.sh would remove that folder
+#   NOTE     the destination skill carries an evals/ folder   -> install.sh leaves that folder as it was (since
+#            issue #8; before, it removed the folder and this line was a WARN). Not counted, it is no gap.
 # The destination is never written. --rehearse copies its agents/, commands/ and skills/ into a temp dir, runs
 # install.sh into that copy and prints the status before and after; the temp dir is removed afterwards.
 # Usage:   scripts/install-status.sh [--source ROOT] <destination>             # <destination> = the .claude directory
 #          scripts/install-status.sh [--source ROOT] --rehearse <destination>  # what would an install change?
-#          scripts/install-status.sh --selftest                                # 7 cases on temp fixtures
+#          scripts/install-status.sh --selftest                                # 8 cases on temp fixtures
 # Options: --source ROOT  repo to compare against (default: the repo this script lives in)
 #          --rehearse     status of a temp copy before and after install.sh; the real destination stays untouched
-# Output:  the lines above, then the last line
+# Output:  one line per tool (SAME · DIFFERS · MISSING · EXTRA, and NOTE for an evals/ folder there), then the last line
 #          "install-status: in step same=S extra=E" or "install-status: BEHIND missing=M differs=D same=S extra=E"
 # Exit:    0 in step · 1 behind (or the rehearsed install failed) · 2 usage / destination is not a directory
 set -uo pipefail
@@ -94,8 +95,10 @@ status() {
       case "$rel" in evals/*) continue ;; esac
       [ -f "$d$rel" ] || echo "    only there: $rel (install.sh keeps it)"
     done < <(cd "$dest/skills/$name" && find . -type f -printf '%P\n' | sort)
+    # Superseded by issue #8 (install.sh no longer removes an evals/ folder the destination already has):
+    #   echo "WARN     skills/$name/evals/ exists there - install.sh would remove that folder"
     if [ -d "$dest/skills/$name/evals" ]; then
-      echo "WARN     skills/$name/evals/ exists there - install.sh would remove that folder"
+      echo "NOTE     skills/$name/evals/ exists there - install.sh leaves that folder as it was"
     fi
   done
 
@@ -193,7 +196,11 @@ selftest() {
   [ "${out##*$'\n'}" = "install-status: in step same=4 extra=3" ] || { echo "selftest FAIL: extras, got: ${out##*$'\n'}"; rc=1; }
   printf '%s\n' "$out" | grep -q -x "EXTRA    commands/y.md (this repo has a skill of that name: skills/y/)" || { echo "selftest FAIL: no same-name hint"; rc=1; }
   printf '%s\n' "$out" | grep -q -x "    only there: notes.md (install.sh keeps it)" || { echo "selftest FAIL: no only-there line"; rc=1; }
-  printf '%s\n' "$out" | grep -q "^WARN     skills/x/evals/ exists there" || { echo "selftest FAIL: no evals warning"; rc=1; }
+  # Superseded (the WARN line became a NOTE, see the two assertions below); the older assertion of this branch,
+  # kept as a comment when main was merged in:
+  #   printf '%s\n' "$out" | grep -q "^WARN     skills/x/evals/ exists there" || { echo "selftest FAIL: no evals warning"; rc=1; }
+  printf '%s\n' "$out" | grep -q -x "NOTE     skills/x/evals/ exists there - install.sh leaves that folder as it was" || { echo "selftest FAIL: no evals note"; rc=1; }
+  printf '%s\n' "$out" | grep -q "would remove that folder" && { echo "selftest FAIL: the report still says install.sh would remove evals/"; rc=1; }
 
   # 5. rehearsal of the partial destination: behind before, in step after, and the destination itself unchanged
   out="$(rehearse "$t/src" "$t/part")" || { echo "selftest FAIL: rehearsal did not end in step"; rc=1; }
@@ -216,8 +223,19 @@ selftest() {
   bash "$SELF" --source "$t/src" "$t/part" >/dev/null 2>&1; code=$?
   [ "$code" -eq 1 ] || { echo "selftest FAIL: cli behind gave exit $code"; rc=1; }
 
+  # 8. what the NOTE line and the "only there" line say is what install.sh does: an install into the extras
+  #    destination keeps its evals/own.json and its notes.md, adds nothing next to own.json (the source's evals/ is
+  #    not installed), and the status is the same afterwards. This case fails with an installer that removes evals/.
+  bash "$t/src/install.sh" "$t/extra" >/dev/null 2>&1 || { echo "selftest FAIL: install into the extras destination failed"; rc=1; }
+  [ "$(cat "$t/extra/skills/x/evals/own.json" 2>/dev/null)" = "e" ] || { echo "selftest FAIL: install.sh did not leave the destination's evals/own.json as it was"; rc=1; }
+  [ ! -e "$t/extra/skills/x/evals/e.json" ] || { echo "selftest FAIL: install.sh installed the source's evals/"; rc=1; }
+  [ -f "$t/extra/skills/x/notes.md" ] || { echo "selftest FAIL: install.sh did not keep a file that is only there"; rc=1; }
+  out="$(status "$t/src" "$t/extra")" || { echo "selftest FAIL: extras destination behind after an install"; rc=1; }
+  [ "${out##*$'\n'}" = "install-status: in step same=4 extra=3" ] || { echo "selftest FAIL: extras after install, got: ${out##*$'\n'}"; rc=1; }
+  printf '%s\n' "$out" | grep -q -x "NOTE     skills/x/evals/ exists there - install.sh leaves that folder as it was" || { echo "selftest FAIL: no evals note after the install"; rc=1; }
+
   rm -rf "$t"
-  [ "$rc" -eq 0 ] && echo "selftest ok (7 cases)"
+  [ "$rc" -eq 0 ] && echo "selftest ok (8 cases)"
   return "$rc"
 }
 

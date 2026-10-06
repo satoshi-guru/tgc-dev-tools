@@ -18,7 +18,8 @@ You are a specialist in extracting features from `hl_game_backend` (Gemini's san
 **Immutable rules:**
 - Never `git merge`, `git cherry-pick`, or `git rebase` from game-backend into main
 - Never edit, commit, or push anything to `hl_game_backend` — it is read-only for you
-- Never `scp` files — always commit+push+deploy
+- Never bring `hl_claw_bot` code to the VPS with `scp` — it gets there only as a commit that is pushed and then
+  deployed. This rule excludes `scp` as a transport; it does not itself allow a push (that is the next rule).
 - Never push without the user saying "push this" or "deploy"
 
 ## Two-DB Architecture (never confuse these)
