@@ -6,14 +6,31 @@
 #   2. section:  each of them has its own heading  ### `name`  or  ### `/name`
 #   3. programs: install.sh and every scripts/*.sh that exists is named in README.md (path as written here)
 #   4. stale:    every entry the README tree lists under agents/, commands/, skills/ exists on disk
-# Usage:   scripts/readme-listing-check.sh [ROOT]      # ROOT defaults to the repo this script lives in
-#          scripts/readme-listing-check.sh --selftest  # proves a complete README passes and four kinds of drift fail
+# Usage:   scripts/readme-listing-check.sh [ROOT]      # ROOT defaults to the repo this script lives in (also through a symlink)
+#          scripts/readme-listing-check.sh --selftest  # 6 cases: a complete README passes, four kinds of drift fail, 10 starts through symlinks (issue #35)
 # Output:  one "MISSING <kind>: <name>" or "STALE <kind>: <name>" line per gap, then the last line
 #          "readme-listing: ok checks=N" or "readme-listing: FAILED gaps=K checks=N"
 # Exit:    0 no gap · 1 gaps (or no README.md) · 2 usage
 set -uo pipefail
 
-SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+# real_path FILE — absolute path of FILE with every symlink resolved (issue #35; the function scripts/gate.sh
+# carries since issue #29): a link to the file by readlink (a chain of at most 40 links, relative targets read from
+# the link's own directory), a link in the directory part by cd -P. Only bash and readlink.
+real_path() {
+  local p="$1" d t n=0
+  while [ -L "$p" ] && [ "$n" -lt 40 ]; do
+    d="$(cd -P "$(dirname "$p")" && pwd)" || return 1
+    t="$(readlink "$p")" || return 1
+    case "$t" in /*) p="$t" ;; *) p="$d/$t" ;; esac
+    n=$((n + 1))
+  done
+  d="$(cd -P "$(dirname "$p")" && pwd)" || return 1
+  printf '%s/%s\n' "$d" "$(basename "$p")"
+}
+
+# Superseded by issue #35 (started through a symlink, SELF was the link and the default ROOT the directory above it):
+# SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+SELF="$(real_path "${BASH_SOURCE[0]}")" || { echo "readme-listing-check.sh: cannot resolve its own path: ${BASH_SOURCE[0]}" >&2; exit 2; }
 GAPS=0
 CHECKS=0
 
@@ -109,6 +126,27 @@ write_readme() {
   } > "$out"
 }
 
+# link_case WHAT DIR WANT TEXT PATH [ARG ...] — selftest helper (issue #35; the form of link_case in scripts/gate.sh):
+# starts the program file PATH with bash in the directory DIR. WANT is "<last output line> exit=N"; a non-empty TEXT
+# must be a whole line of the output as well. Prints the difference and returns 1 when it does not hold.
+link_case() {
+  local what="$1" dir="$2" want="$3" text="$4" out code got
+  shift 4
+  out="$(cd "$dir" && bash "$@" 2>&1)"
+  code=$?
+  got="${out##*$'\n'} exit=$code"
+  if [ "$got" != "$want" ]; then
+    echo "selftest FAIL: $what: want '$want' got '$got'"
+    return 1
+  fi
+  if [ -n "$text" ] && ! printf '%s\n' "$out" | grep -q -x -F -- "$text"; then
+    echo "selftest FAIL: $what: the output lacks the line '$text':"
+    printf '%s\n' "$out"
+    return 1
+  fi
+  return 0
+}
+
 selftest() {
   local t rc=0 out
   t="$(mktemp -d)"
@@ -150,8 +188,59 @@ selftest() {
   # 5. no README at all
   out="$(report "$t/none")" && { echo "selftest FAIL: missing README accepted"; rc=1; }
 
+  # 6. started through symlinks (issue #35): the program file itself, started with bash and without ROOT in an
+  #    empty directory, directly and through links - the answer is that of the repo the file belongs to, never
+  #    that of the directory above the link. Four trees, each with a last line of its own:
+  #      linkrepo     the good fixture plus scripts/ with a copy of this file         ok checks=15
+  #      linkrepobad  the same plus a skill z the README does not name               FAILED gaps=2 checks=17
+  #      overgood     a complete tree with one skill and no scripts/ of its own      ok checks=12
+  #      overbad      the same plus a skill w the README does not name               FAILED gaps=2 checks=14
+  #    overgood / overbad are the directories the links are put into; a program that takes the directory above
+  #    the link reads these instead (green on the link to linkrepobad, red on the link to linkrepo).
+  #    10 starts: 2 direct, 2 through a file link in an otherwise empty directory (the measured case of the
+  #    issue), 2 through a file link inside overgood / overbad, 1 through a link with a relative target, 1 through
+  #    a link to a link, 2 through a link to the scripts/ directory.
+  local d ok='readme-listing: ok checks=15 exit=0' bad='readme-listing: FAILED gaps=2 checks=17 exit=1'
+  local why='MISSING tree: skills/z/'
+  cp -r "$t/good" "$t/linkrepo"
+  cp "$SELF" "$t/linkrepo/scripts/readme-listing-check.sh"
+  printf 'Lister: `scripts/readme-listing-check.sh`\n' >> "$t/linkrepo/README.md"
+  cp -r "$t/linkrepo" "$t/linkrepobad"
+  mkdir -p "$t/linkrepobad/skills/z"
+  printf 'z\n' > "$t/linkrepobad/skills/z/SKILL.md"
+  for d in overgood overbad; do
+    mkdir -p "$t/$d/agents" "$t/$d/commands" "$t/$d/skills/x" "$t/$d/sub"
+    printf 'a\n' > "$t/$d/agents/a.md"
+    printf 'c\n' > "$t/$d/commands/c.md"
+    printf 'x\n' > "$t/$d/skills/x/SKILL.md"
+    printf '#!/usr/bin/env bash\n' > "$t/$d/install.sh"
+    write_readme "$t/$d/README.md" x
+    printf 'Lister: `scripts/readme-listing-check.sh`\n' >> "$t/$d/README.md"
+  done
+  mkdir -p "$t/overbad/skills/w"
+  printf 'w\n' > "$t/overbad/skills/w/SKILL.md"
+  mkdir -p "$t/cwd" "$t/lone/sub" "$t/rel/sub" "$t/chain/sub"
+  ln -s "$t/linkrepo/scripts/readme-listing-check.sh" "$t/lone/sub/lister.sh"
+  ln -s "$t/linkrepobad/scripts/readme-listing-check.sh" "$t/lone/sub/lister-bad.sh"
+  ln -s "$t/linkrepobad/scripts/readme-listing-check.sh" "$t/overgood/sub/lister.sh"
+  ln -s "$t/linkrepo/scripts/readme-listing-check.sh" "$t/overbad/sub/lister.sh"
+  ln -s ../../linkrepobad/scripts/readme-listing-check.sh "$t/rel/sub/lister.sh"
+  ln -s "$t/rel/sub/lister.sh" "$t/chain/sub/lister.sh"
+  ln -s "$t/linkrepobad/scripts" "$t/overgood/scripts"
+  ln -s "$t/linkrepo/scripts" "$t/overbad/scripts"
+  link_case "6 direct start, complete tree" "$t/cwd" "$ok" "" "$t/linkrepo/scripts/readme-listing-check.sh" || rc=1
+  link_case "6 direct start, tree with a gap" "$t/cwd" "$bad" "$why" "$t/linkrepobad/scripts/readme-listing-check.sh" || rc=1
+  link_case "6 file link in an empty directory, complete tree" "$t/cwd" "$ok" "" "$t/lone/sub/lister.sh" || rc=1
+  link_case "6 file link in an empty directory, tree with a gap" "$t/cwd" "$bad" "$why" "$t/lone/sub/lister-bad.sh" || rc=1
+  link_case "6 file link to the tree with a gap, placed inside a complete tree" "$t/cwd" "$bad" "$why" "$t/overgood/sub/lister.sh" || rc=1
+  link_case "6 file link to the complete tree, placed inside a tree with a gap" "$t/cwd" "$ok" "" "$t/overbad/sub/lister.sh" || rc=1
+  link_case "6 file link with a relative target, tree with a gap" "$t/cwd" "$bad" "$why" "$t/rel/sub/lister.sh" || rc=1
+  link_case "6 link to a link, tree with a gap" "$t/cwd" "$bad" "$why" "$t/chain/sub/lister.sh" || rc=1
+  link_case "6 link to scripts/ of the tree with a gap, placed inside a complete tree" "$t/cwd" "$bad" "$why" "$t/overgood/scripts/readme-listing-check.sh" || rc=1
+  link_case "6 link to scripts/ of the complete tree, placed inside a tree with a gap" "$t/cwd" "$ok" "" "$t/overbad/scripts/readme-listing-check.sh" || rc=1
+
   rm -rf "$t"
-  [ "$rc" -eq 0 ] && echo "selftest ok (5 cases)"
+  [ "$rc" -eq 0 ] && echo "selftest ok (6 cases)"
   return "$rc"
 }
 
@@ -160,6 +249,7 @@ case "${1:-}" in
   -h|--help) awk 'NR>1 && /^#/{sub(/^# ?/, ""); print; next} NR>1{exit}' "$SELF"; exit 0 ;;
   -*) echo "readme-listing-check.sh: unknown option $1" >&2; exit 2 ;;
 esac
-ROOT="${1:-$(cd "$(dirname "$SELF")/.." && pwd)}"
+# issue #35: SELF is resolved, so the default is the repo the program file belongs to, however it was started
+ROOT="${1:-$(cd -P "$(dirname "$SELF")/.." && pwd)}"
 [ -d "$ROOT" ] || { echo "readme-listing-check.sh: not a directory: $ROOT" >&2; exit 2; }
 report "$ROOT"
