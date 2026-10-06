@@ -32,6 +32,11 @@
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
+#          scripts/gate.sh --push-main [FILE ...]  # check 7 alone, as a readout (issue #25): one "FILE:LINE: command" line
+#          per reported command, then the last line "push-main: ok files=N" (exit 0) or "push-main: FOUND hits=K files=N"
+#          (exit 1); exit 2 and nothing read when a FILE is no readable file. Without FILE: the files check 7 reads in
+#          this repo, README.md and what install.sh installs
+#          scripts/gate.sh --help     # this header
 set -uo pipefail
 
 # Superseded header lines of the earlier state of this branch (PR #9, 4 broken + 2 good fixtures), kept as a comment
@@ -205,6 +210,70 @@ readme_push_main() {
       exit found ? 0 : 1
     }
   ' "$1"
+}
+
+# tool_files ROOT — prints, each ended by a NUL byte and sorted by byte value, the path of every file install.sh
+# copies from ROOT into a project (issue #25): agents/*.md, commands/*.md and every file of every skills/<name>/,
+# hidden ones too, except the skill's own evals/ folder. The entries of a skill are taken the way install.sh takes
+# them (three patterns, the entry named evals skipped), so an evals/ deeper inside a skill is read like install.sh
+# installs it. Not printed: a symlink (install.sh copies the link, not what it points to), scripts/, .claude/ and
+# README.md - they are not installed.
+tool_files() {
+  local root="$1" f d e
+  {
+    for f in "$root"/agents/*.md "$root"/commands/*.md; do
+      [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\0' "$f"
+    done
+    for d in "$root"/skills/*/; do
+      [ -d "$d" ] || continue
+      for e in "$d"* "$d".[!.]* "$d"..?*; do
+        [ -e "$e" ] || continue
+        [ "$(basename "$e")" = "evals" ] && continue
+        find "$e" -type f -print0
+      done
+    done
+  } | LC_ALL=C sort -z
+}
+
+# push_main_readout [FILE...] — the option --push-main (issue #25): check 7 alone, as a readout. Runs
+# readme_push_main over every FILE and prints one "FILE:LINE: command" line per report (FILE as it was given), then
+# the last line "push-main: ok files=N" or "push-main: FOUND hits=K files=N". Returns 0 when nothing is reported, 1
+# when something is, 2 when a FILE is no readable file - then nothing is read, so a readout never says ok about a
+# list it read only in part.
+# Without a FILE it reads what check 7 reads in the repo this file belongs to: README.md and the files of
+# tool_files, named by their path below the repo root. Nothing to read there is exit 2 as well, not an ok.
+push_main_readout() {
+  local f out root="" strip="" hits=0 files=0
+  local -a paths=()
+  if [ "$#" -eq 0 ]; then
+    root="$(cd -P "$(dirname "$SELF")/.." && pwd)" || { echo "gate.sh: --push-main: cannot resolve the repo root" >&2; return 2; }
+    strip="$root/"
+    [ -f "$root/README.md" ] && paths+=("$root/README.md")
+    while IFS= read -r -d '' f; do paths+=("$f"); done < <(tool_files "$root")
+    [ "${#paths[@]}" -gt 0 ] || { echo "gate.sh: --push-main: no README.md and no installed file in $root" >&2; return 2; }
+  else
+    paths=("$@")
+  fi
+  for f in "${paths[@]}"; do
+    if [ ! -f "$f" ] || [ ! -r "$f" ]; then
+      echo "gate.sh: --push-main: not a readable file: ${f#"$strip"}" >&2
+      return 2
+    fi
+  done
+  for f in "${paths[@]}"; do
+    files=$((files + 1))
+    while IFS= read -r out; do
+      [ -n "$out" ] || continue
+      printf '%s:%s\n' "${f#"$strip"}" "$out"
+      hits=$((hits + 1))
+    done < <(readme_push_main "$f")
+  done
+  if [ "$hits" -eq 0 ]; then
+    echo "push-main: ok files=$files"
+    return 0
+  fi
+  echo "push-main: FOUND hits=$hits files=$files"
+  return 1
 }
 
 run_checks() {
@@ -887,6 +956,11 @@ EOF
 }
 
 if [ "${1:-}" = "--selftest" ]; then selftest; exit $?; fi
+# issue #25: the header of this file as the usage text, and check 7 alone as a readout
+case "${1:-}" in
+  -h|--help) awk 'NR>1 && /^#/{sub(/^# ?/, ""); print; next} NR>1{exit}' "$SELF"; exit 0 ;;
+  --push-main) shift; push_main_readout "$@"; exit $? ;;
+esac
 # issue #29: SELF is resolved, so this is the repo the program file belongs to, however the gate was started
 ROOT="$(cd -P "$(dirname "$SELF")/.." && pwd)"
 if run_checks "$ROOT"; then echo "gate: ok"; else echo "gate: FAILED"; exit 1; fi
