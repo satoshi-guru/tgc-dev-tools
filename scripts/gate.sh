@@ -27,10 +27,15 @@
 #      switch or checkout to main in the same code block. Since issue #30 also: git called by its path
 #      (/usr/bin/git push ...), a ref or command in single quotes, and lines that end in a carriage return (CRLF).
 #      Since issue #33 also: the command word in quotes ("git" push ..., "/usr/bin/git" push ...)
+#      Since issue #25 the same reader also runs over every file install.sh copies into a project: agents/*.md,
+#      commands/*.md and every file of a skill (hidden ones and symlinked ones too) except its evals/. One FAIL per
+#      command line there as well, named by the path of the file below the root. No exceptions file exists: the
+#      readout of 2026-10-06 over the 18 installed files reported nothing (see the comment at the check)
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 16 broken fixtures and pass on 7 good ones (+ 29 line cases and 109 block cases for check 7,
+#          scripts/gate.sh --selftest # proves the checks fail on 23 broken fixtures and pass on 9 good ones (+ 29 line cases and 109 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
-#          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35)
+#          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35,
+#          + 8 starts of the gate file with --push-main and 1 with --help - issue #25)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 #          scripts/gate.sh --push-main [FILE ...]  # check 7 alone, as a readout (issue #25): one "FILE:LINE: command" line
 #          per reported command, then the last line "push-main: ok files=N" (exit 0) or "push-main: FOUND hits=K files=N"
@@ -216,20 +221,29 @@ readme_push_main() {
 # copies from ROOT into a project (issue #25): agents/*.md, commands/*.md and every file of every skills/<name>/,
 # hidden ones too, except the skill's own evals/ folder. The entries of a skill are taken the way install.sh takes
 # them (three patterns, the entry named evals skipped), so an evals/ deeper inside a skill is read like install.sh
-# installs it. Not printed: a symlink (install.sh copies the link, not what it points to), scripts/, .claude/ and
-# README.md - they are not installed.
+# installs it. Not printed: scripts/, .claude/ and README.md - they are not installed.
+# A symlink to a file is printed by the path of the link, so its content is read: install.sh copies an agent or
+# command with a plain cp, which copies what the link points to, and an entry of a skill with cp -r, which copies
+# the link itself - on the machine of the install that link still leads to the same content. Not printed: a link
+# that leads to no file, and what lies behind a link to a directory (cp -r copies that link, find does not enter
+# it).
+# Superseded first form of this function (same branch, before the symlink cases toolagentlink and toolskilllink):
+# the agents and commands loop also tested [ ! -L "$f" ] and the skills loop ran find "$e" -type f -print0, so a
+# linked file was never read and a command behind it passed check 7.
 tool_files() {
   local root="$1" f d e
   {
     for f in "$root"/agents/*.md "$root"/commands/*.md; do
-      [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\0' "$f"
+      [ -f "$f" ] && printf '%s\0' "$f"
     done
     for d in "$root"/skills/*/; do
       [ -d "$d" ] || continue
       for e in "$d"* "$d".[!.]* "$d"..?*; do
         [ -e "$e" ] || continue
         [ "$(basename "$e")" = "evals" ] && continue
-        find "$e" -type f -print0
+        while IFS= read -r -d '' f; do
+          [ -f "$f" ] && printf '%s\0' "$f"
+        done < <(find "$e" \( -type f -o -type l \) -print0)
       done
     done
   } | LC_ALL=C sort -z
@@ -878,9 +892,9 @@ EOF
     echo "selftest note: the check 3 cases cwdagent and cwdagentbad skipped (no store program agent-file-check.py)"
   fi
   # tool file cases (check 7, issue #25): the listed fixture (checks 1 to 6 green, README without a push) plus a push
-  # instruction in a file that install.sh copies into a project - there it is repeated in every session. 5 rejected,
-  # one per kind of installed file, each by exactly one FAIL line that names the file, the line and the command;
-  # 2 accepted. The fixture files: agents/a.md and skills/x/SKILL.md have 5 lines, commands/c.md has 1; an appended
+  # instruction in a file that install.sh copies into a project - there it is repeated in every session. 7 rejected
+  # (one per kind of installed file, and two that are reached through a symlink), each by exactly one FAIL line
+  # that names the file, the line and the command; 2 accepted. The fixture files: agents/a.md and skills/x/SKILL.md have 5 lines, commands/c.md has 1; an appended
   # block starts with a blank line.
   #   toolagent:     agents/a.md + a code block                      -> the command is line 8
   #   toolcommand:   commands/c.md + a sentence with inline code     -> line 3
@@ -906,6 +920,23 @@ EOF
   cp -r "$t/listed" "$t/toolhidden"
   printf 'git push -u origin feat/x:main\n' > "$t/toolhidden/skills/x/.notes.md"
   tool_file_case "hidden file of a skill with 'git push -u origin feat/x:main'" "$t/toolhidden" "FAIL: skills/x/.notes.md:1: $why25: git push -u origin feat/x:main" || rc=1
+  #   toolagentlink: agents/a.md is a symlink to shared/a.md, a file outside agents/ that carries the command.
+  #                  install.sh copies agents and commands with a plain cp, which copies what a link points to, so
+  #                  the content reaches the project -> rejected, named by the path of the link, line 8
+  #   toolskilllink: skills/x/more.md is a symlink (absolute target) to a file outside the skill that carries the
+  #                  command. install.sh copies the entries of a skill with cp -r, which copies the link itself; on
+  #                  the machine of the install the link still leads to that content -> rejected, line 1
+  cp -r "$t/listed" "$t/toolagentlink"
+  mkdir -p "$t/toolagentlink/shared"
+  mv "$t/toolagentlink/agents/a.md" "$t/toolagentlink/shared/a.md"
+  printf '\n```bash\ngit push origin main\n```\n' >> "$t/toolagentlink/shared/a.md"
+  ln -s ../shared/a.md "$t/toolagentlink/agents/a.md"
+  tool_file_case "agent file that is a symlink to a file with 'git push origin main'" "$t/toolagentlink" "FAIL: agents/a.md:8: $why25: git push origin main" || rc=1
+  cp -r "$t/listed" "$t/toolskilllink"
+  mkdir -p "$t/toolskilllink/shared"
+  printf 'git push origin main\n' > "$t/toolskilllink/shared/more.md"
+  ln -s "$t/toolskilllink/shared/more.md" "$t/toolskilllink/skills/x/more.md"
+  tool_file_case "symlink inside a skill to a file with 'git push origin main'" "$t/toolskilllink" "FAIL: skills/x/more.md:1: $why25: git push origin main" || rc=1
   cp -r "$t/listed" "$t/toolevals"
   mkdir -p "$t/toolevals/skills/x/evals"
   printf 'git push origin main\n' > "$t/toolevals/skills/x/evals/e.md"
