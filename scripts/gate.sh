@@ -104,7 +104,9 @@ frontmatter_ok() {
 # issue #30, left out there on purpose because it changes how the state is scoped; now issue #32); git reached
 # through a variable or a command substitution ("$GIT" push, ${GIT} push, $(command -v git) push,
 # "$(command -v git)" push - left out of issue #33 on purpose: what a variable holds cannot be read from the text,
-# and a rule for "any variable followed by push" would be a guess); a file whose only line ends are bare carriage
+# and a rule for "any variable followed by push" would be a guess); the subcommand in quotes and quotes or a
+# backslash inside the command word (git "push" origin main, gi"t" push, g\it push - issue #41; a backslash in
+# front of the word, \git push, is seen); a file whose only line ends are bare carriage
 # returns (one line for awk, named in issue #33, not built there); a branch change by other means
 # (git switch --track origin/main,
 # git branch -M main, git clone, git worktree, cd into another clone), `git checkout <path>` without "--" (read as
