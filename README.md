@@ -114,21 +114,35 @@ that copy and prints the status before and after. The real destination is not wr
 Start the program by its real path: through a symlink it looks for the repo above the link and ends with exit 2
 (issue #43, the class of issue #35).
 
-State measured on 2026-10-06 (read-only, `main` at `dcffc30` plus this program; issue #6). The gap is open:
+State measured on 2026-10-06 15:35 (read-only, source `main` at `0781454`; issue #6). Both destinations are in step:
 
-| Destination | Result | Missing | Differs (an install overwrites) | Extra (not from this repo) |
-|---|---|---|---|---|
-| `hl_claw_bot/.claude` | `BEHIND missing=3 differs=2 same=7 extra=4` | skills `design-review`, `llmdoc`, `session-init` | agent `code-porter`, skill `port-feature` (`SKILL.md`) — here changed 2026-10-06, there from 2026-05-24 | agents `bb-bauer`, `bb-pruefer`, `bb-verifikation`; command `start-coding-session.md` |
-| `hl_game_backend/.claude` | `BEHIND missing=11 differs=0 same=1 extra=7` | everything except command `rescue-bot` | — | agents `bb-bauer`, `bb-pruefer`, `bb-verifikation`, `game-builder`, `game-designer`, `game-validator`, `isekai-storyteller` |
+| Destination | Result | Exit | Missing | Differs | Extra (not from this repo, left alone) |
+|---|---|---|---|---|---|
+| `hl_claw_bot/.claude` | `in step same=12 extra=4` | 0 | — | — | agents `bb-bauer`, `bb-pruefer`, `bb-verifikation`; command `start-coding-session.md` |
+| `hl_game_backend/.claude` | `in step same=12 extra=7` | 0 | — | — | agents `bb-bauer`, `bb-pruefer`, `bb-verifikation`, `game-builder`, `game-designer`, `game-validator`, `isekai-storyteller` |
 
-The table is a dated measurement, not a standing fact — run the program for today's state. On 2026-10-03 the first
-row read `differs=0 same=9`; the two files that differ now were changed here since (issue #38), so sessions in
-`hl_claw_bot` still run the older `code-porter` and `/port-feature`. Whether `hl_game_backend` should get the full
-set is an open decision of the repo owner (issue #6) — this README does not claim that any tool is left out on
-purpose. The three skills missing in `hl_claw_bot` also exist in `~/.claude/skills/`, so a session there already
-loads the global copy of those names, and an install adds a project copy that the global one overrides (next
-section). `hl_claw_bot/.claude/commands/start-coding-session.md` does not come from this repo (here
-`start-coding-session` is a skill); an install neither updates nor removes it.
+Both repos get the full set: 2 agents, 2 commands, 8 skills. That was decided on 2026-10-06 (issue #6); no tool is
+left out of either repo on purpose. `install.sh` ran into both destinations that day (the installed files there
+carry 15:27).
+
+How the gap closed — the same program against the same two destinations:
+
+| Measured | `hl_claw_bot/.claude` | `hl_game_backend/.claude` |
+|---|---|---|
+| 2026-10-03 | `BEHIND missing=3 differs=0 same=9 extra=4`, exit 1 | `BEHIND missing=11 differs=0 same=1 extra=7`, exit 1 |
+| 2026-10-06 14:26 | `BEHIND missing=3 differs=2 same=7 extra=4`, exit 1 | `BEHIND missing=11 differs=0 same=1 extra=7`, exit 1 |
+| 2026-10-06 15:35, after the install | `in step same=12 extra=4`, exit 0 | `in step same=12 extra=7`, exit 0 |
+
+The table is a dated measurement, not a standing fact — run the program for today's state. Every merge here that
+changes an installed file puts both destinations behind again until the reinstall (steps 3 and 4 of "Update
+Workflow"): the second row shows it, two files (`code-porter`, `/port-feature`, issue #38) had changed here and the
+copies in `hl_claw_bot` were from 2026-05-24. Only the main checkouts of the two repos were measured; a worktree of
+either repo has its own untracked `.claude` and needs its own install.
+
+Four of the installed skills (`design-review`, `llmdoc`, `session-init`, `start-coding-session`) also exist in
+`~/.claude/skills/`. On this machine a session in either repo loads the global copy of those names; the project
+copy that the install put there is overridden (next section). `hl_claw_bot/.claude/commands/start-coding-session.md`
+does not come from this repo (here `start-coding-session` is a skill); an install neither updates nor removes it.
 
 ---
 
