@@ -43,7 +43,9 @@ tgc-dev-tools/
 
 Copy tools into a project's `.claude/` directory. The destination is **required** — there is no default.
 A bare `./install.sh` prints the usage and exits 2 without writing anything (until issue #4 it silently
-installed into `hl_claw_bot`).
+installed into `hl_claw_bot`). The source is always the repo `install.sh` belongs to, also when it is started
+through a symlink such as `~/bin/tgc-install` (until issue #35 it took the directory of the link: it stopped with a
+`cp` error, or installed that directory's `agents/`, `commands/` and `skills/` if it had any).
 
 ```bash
 # Install into hl_claw_bot
@@ -154,7 +156,7 @@ Measure it — read-only, it never writes to the store or to this repo:
 ```bash
 scripts/skill-drift.sh               # last line "skill-drift: in step same=1 extra=2 fork=1 only-here=4" (exit 0)
 scripts/skill-drift.sh llmdoc        # one skill only
-scripts/skill-drift.sh --selftest    # 10 cases on temp fixtures
+scripts/skill-drift.sh --selftest    # 11 cases on temp fixtures
 ```
 
 - `SAME` every file identical · `EXTRA` everything the store holds is here verbatim, this repo has more ·
@@ -392,7 +394,7 @@ headings with `agents/`, `commands/`, `skills/` on disk, in both directions:
 
 ```bash
 scripts/readme-listing-check.sh             # "MISSING …"/"STALE …" lines, then "readme-listing: ok checks=N" or "FAILED gaps=K"
-scripts/readme-listing-check.sh --selftest
+scripts/readme-listing-check.sh --selftest   # 6 cases on temp fixtures
 ```
 
 So a new skill, agent or command needs a tree line **and** a `###` section here, or the gate is red.
@@ -409,8 +411,11 @@ scripts/link-start-probe.sh --selftest        # 6 cases on temp fixtures
 
 It is not a gate check (the gate's own selftest starts the gate through links). `scripts/gate.sh` gives the same
 answer on all five starts since issue #29; `scripts/readme-listing-check.sh`, `scripts/skill-drift.sh` and
-`install.sh` do not yet — started through a link they look for the repo above the link and end red on a good repo
-(exit 1 / exit 2 / a `cp` error), see issue #35. Start those three by their real path.
+`install.sh` since issue #35 (before, started through a link they looked for the repo above the link: exit 1 /
+exit 2 / a `cp` error on a good repo, and the answer or the files of another tree when the link sat inside one).
+Each of the three starts itself through links in a selftest: the first two in their own `--selftest`, `install.sh`
+in `scripts/gate.sh --selftest`. `scripts/install-status.sh` does not give the same answer yet (issue #43) — start
+that one by its real path.
 
 `scripts/skill-drift.sh` is deliberately **not** a gate check (it reads `~/.claude/skills`, which differs per
 machine and changes without a commit here); see "Skills that also exist in `~/.claude/skills`".

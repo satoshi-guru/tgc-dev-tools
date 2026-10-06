@@ -29,7 +29,8 @@
 #      Since issue #33 also: the command word in quotes ("git" push ..., "/usr/bin/git" push ...)
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
 #          scripts/gate.sh --selftest # proves the checks fail on 16 broken fixtures and pass on 7 good ones (+ 29 line cases and 109 block cases for check 7,
-#          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29)
+#          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
+#          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 set -uo pipefail
 
@@ -362,6 +363,28 @@ link_case() {
   if [ -n "${5:-}" ] && ! printf '%s\n' "$out" | grep -q -F -- "$5"; then
     echo "selftest FAIL: $1: the output lacks '$5':"
     printf '%s\n' "$out"
+    return 1
+  fi
+  return 0
+}
+
+# install_link_case WHAT DIR PATH DEST WANT — selftest helper (issue #35): starts the installer file PATH with bash
+# in the directory DIR, with the destination DEST (a directory below the selftest's temp dir that does not exist
+# yet). The start must end with exit 0, and DEST must then hold exactly the files WANT (one "./path" per line,
+# sorted) - the files of the repo the installer file belongs to, not those of the directory above the link.
+# Prints the difference and returns 1 when it does not hold.
+install_link_case() {
+  local out code got
+  out="$(cd "$2" && bash "$3" "$4" 2>&1)"
+  code=$?
+  if [ "$code" -ne 0 ]; then
+    echo "selftest FAIL: $1: exit $code, want 0; last line: ${out##*$'\n'}"
+    return 1
+  fi
+  got="$(cd "$4" && find . -type f | LC_ALL=C sort)"
+  if [ "$got" != "$5" ]; then
+    echo "selftest FAIL: $1: installed files differ from those of the installer's own repo; got:"
+    printf '    | %s\n' $got
     return 1
   fi
   return 0
@@ -765,6 +788,31 @@ EOF
   link_case "link to a link, broken tree" "$t/cwd" "$t/chain/sub/gate.sh" 'gate: FAILED exit=1' "$why" || rc=1
   link_case "link to scripts/ of the broken tree, placed inside a passing tree" "$t/cwd" "$t/overgood/scripts/gate.sh" 'gate: FAILED exit=1' "$why" || rc=1
   link_case "link to scripts/ of the good tree, placed inside a failing tree" "$t/cwd" "$t/overbad/scripts/gate.sh" 'gate: ok exit=0' || rc=1
+  # installer link cases (issue #35): install.sh of this repo as linkrepo carries it (agent a, command c, skill x),
+  # started with bash in an empty directory, directly and through symlinks, each time into a destination of its
+  # own below the temp dir. Every start ends with exit 0 and installs exactly the three files of linkrepo.
+  #   instdecoy: a directory with agents/, commands/ and skills/ of its own (one file "decoy" in each) - where one
+  #              link is put. An installer that takes the directory of the link installs the decoy files from
+  #              there and ends with exit 0; from an empty directory it stops with a cp error (the measured case).
+  # 6 starts: 1 direct, 1 through a file link in an otherwise empty directory, 1 through a file link inside
+  # instdecoy, 1 through a link with a relative target, 1 through a link to a link, 1 through a link to the repo
+  # directory.
+  local inst=$'./agents/a.md\n./commands/c.md\n./skills/x/SKILL.md'
+  mkdir -p "$t/instdecoy/agents" "$t/instdecoy/commands" "$t/instdecoy/skills/decoy" "$t/instdir" "$t/instdest"
+  printf -- '---\nname: decoy\ndescription: d\n---\nbody\n' > "$t/instdecoy/agents/decoy.md"
+  printf 'cmd\n' > "$t/instdecoy/commands/decoy.md"
+  printf -- '---\nname: decoy\ndescription: d\n---\nbody\n' > "$t/instdecoy/skills/decoy/SKILL.md"
+  ln -s "$t/linkrepo/install.sh" "$t/lone/sub/install.sh"
+  ln -s "$t/linkrepo/install.sh" "$t/instdecoy/install.sh"
+  ln -s ../../linkrepo/install.sh "$t/rel/sub/install.sh"
+  ln -s "$t/rel/sub/install.sh" "$t/chain/sub/install.sh"
+  ln -s "$t/linkrepo" "$t/instdir/repo"
+  install_link_case "installer, direct start" "$t/cwd" "$t/linkrepo/install.sh" "$t/instdest/direct/.claude" "$inst" || rc=1
+  install_link_case "installer, file link in an empty directory" "$t/cwd" "$t/lone/sub/install.sh" "$t/instdest/lone/.claude" "$inst" || rc=1
+  install_link_case "installer, file link placed in a directory with agents/, commands/, skills/ of its own" "$t/cwd" "$t/instdecoy/install.sh" "$t/instdest/decoy/.claude" "$inst" || rc=1
+  install_link_case "installer, file link with a relative target" "$t/cwd" "$t/rel/sub/install.sh" "$t/instdest/rel/.claude" "$inst" || rc=1
+  install_link_case "installer, link to a link" "$t/cwd" "$t/chain/sub/install.sh" "$t/instdest/chain/.claude" "$inst" || rc=1
+  install_link_case "installer, link to the repo directory" "$t/cwd" "$t/instdir/repo/install.sh" "$t/instdest/dir/.claude" "$inst" || rc=1
   rm -rf "$t"
   [ "$rc" -eq 0 ] && echo "selftest ok"
   return "$rc"
