@@ -677,6 +677,39 @@ EOF
   push_block '' '"$GIT" push origin main' || rc=1
   push_block '' '$(command -v git) push origin main' || rc=1
   push_block '' '"$(command -v git)" push origin main' || rc=1
+  # block cases for check 7 (issue #32), one more form. T is a tab.
+  # form 9 — a push without a ref while main is checked out, in an indented code block (four blanks or a tab in
+  # front of the line, no fence): 12 reported, 14 left alone. Outside a fence the state lives from one indented line
+  # to the next; an empty line between two indented lines belongs to the block and keeps it; the first line with
+  # text that is not indented that far ends it. The state has to be set inside the indented lines: a switch to main
+  # in a line that is not indented lives for that line only, as before.
+  local T=$'\t'
+  push_block 2 '    git switch main' '    git push' || rc=1
+  push_block 4 'An indented block:' '' '    git switch main' '    git push' || rc=1
+  push_block 2 "${T}git switch main" "${T}git push" || rc=1
+  push_block 2 "  ${T}git switch main" "  ${T}git push origin" || rc=1
+  push_block 3 '    git switch main' '' '    git push' || rc=1
+  push_block 3 '    git switch main' '  ' '    git push' || rc=1
+  push_block 3 '    git checkout main' '    git pull --ff-only origin main' '    git push origin' || rc=1
+  push_block 2 '    git switch main' '    git push -u origin HEAD' || rc=1
+  push_block 2 '        git switch main' '        git push' || rc=1
+  push_block '2 3' '    git switch main' '    git push' "${T}git push origin" || rc=1
+  push_block 3 '    git switch main && \' '      git pull --ff-only origin main' '    git push' || rc=1
+  push_block 3 "    git switch main$R" "$R" "    git push$R" || rc=1
+  push_block '' '    git switch main' 'Then, on the work branch:' '    git push' || rc=1
+  push_block '' '    git switch main' '' 'Then, on the work branch:' '' '    git push' || rc=1
+  push_block '' '    git switch main' '    git pull --ff-only origin main' || rc=1
+  push_block '' '    git switch main' '    git push -u origin feat/x' || rc=1
+  push_block '' '    git switch main' '    git push origin --tags' || rc=1
+  push_block '' '    git switch main' '    git switch feat/x' '    git push' || rc=1
+  push_block '' '    git switch main' '    git switch -c feat/x' '    git push' || rc=1
+  push_block '' '    git add README.md' '    git push' || rc=1
+  push_block '' '    git switch main' 'git push' || rc=1
+  push_block '' 'Run `git switch main` first.' '' '    git push' || rc=1
+  push_block '' 'git switch main' '    git push' || rc=1
+  push_block '' '   git switch main' '   git push' || rc=1
+  push_block '' '    git switch main' "$F" 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch main' "$F" '    git push' || rc=1
   # pushwrapped / pushonmain / pushflow: the same through run_checks, like pushmain above (block at line 20). The
   # wrapped command is named at the line where it starts (21), the push without a ref at its own line (22); the
   # step-3 block of the real README (switch to main, pull, install) stays accepted.
@@ -719,6 +752,24 @@ EOF
   } > "$t/pushcrlfbranch/README.md"
   out="$(run_checks "$t/pushcrlfbranch")" || {
     echo "selftest FAIL: README with CRLF line endings and 'git push -u origin feat/x' rejected:"
+    printf '%s\n' "$out"
+    rc=1
+  }
+  # pushindent / pushindentflow (issue #32): the listed README plus an indented code block (no fence). The appended
+  # text is an empty line (20), a sentence (21), an empty line (22) and the two command lines (23, 24) - the fixture
+  # of the issue. The push without a ref is named at its own line (24); the same block with a switch to main, a pull
+  # and the install (step 3 of the real README, written as an indented block) stays accepted.
+  cp -r "$t/listed" "$t/pushindent"
+  printf '\nAn indented block:\n\n    git switch main\n    git push\n' >> "$t/pushindent/README.md"
+  out="$(run_checks "$t/pushindent")"
+  case "$out" in
+    *"FAIL: README.md:24: git push to main"*) ;;
+    *) echo "selftest FAIL: README with 'git switch main' + 'git push' in an indented code block accepted"; rc=1 ;;
+  esac
+  cp -r "$t/listed" "$t/pushindentflow"
+  printf '\nAn indented block:\n\n    git switch main && git pull --ff-only origin main\n    ./install.sh /tmp/x/.claude\n' >> "$t/pushindentflow/README.md"
+  out="$(run_checks "$t/pushindentflow")" || {
+    echo "selftest FAIL: README with 'git switch main && git pull' + install in an indented code block rejected:"
     printf '%s\n' "$out"
     rc=1
   }
