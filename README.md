@@ -98,7 +98,7 @@ Because the installed copies are untracked, nothing in `git status` of a target 
 scripts/install-status.sh /home/rootvault/Dokumente/hl_claw_bot/.claude      # exit 0 in step · 1 behind · 2 usage
 scripts/install-status.sh /home/rootvault/Dokumente/hl_game_backend/.claude
 scripts/install-status.sh --rehearse /path/to/project/.claude                # what would an install change?
-scripts/install-status.sh --selftest                                         # 8 cases on temp fixtures
+scripts/install-status.sh --selftest                                         # 10 cases on temp fixtures
 ```
 
 One line per tool, then `install-status: in step same=S extra=E` or
@@ -117,8 +117,9 @@ One line per tool, then `install-status: in step same=S extra=E` or
 `--rehearse` copies the destination's `agents/`, `commands/` and `skills/` into a temp dir, runs `install.sh` into
 that copy and prints the status before and after. The real destination is not written.
 
-Start the program by its real path: through a symlink it looks for the repo above the link and ends with exit 2
-(issue #43, the class of issue #35).
+The program compares against the repo its file belongs to, also when it is started through a symlink (since
+issue #43, the class of issue #35; until then it looked for the repo above the link and ended with exit 2, and
+`--rehearse` would have run the `install.sh` of that directory if it had one). `--source ROOT` names another repo.
 
 State measured on 2026-10-06 15:35 (read-only, source `main` at `0781454`; issue #6). Both destinations are in step:
 
@@ -455,8 +456,9 @@ answer on all five starts since issue #29; `scripts/readme-listing-check.sh`, `s
 `install.sh` since issue #35 (before, started through a link they looked for the repo above the link: exit 1 /
 exit 2 / a `cp` error on a good repo, and the answer or the files of another tree when the link sat inside one).
 Each of the three starts itself through links in a selftest: the first two in their own `--selftest`, `install.sh`
-in `scripts/gate.sh --selftest`. `scripts/install-status.sh` does not give the same answer yet (issue #43) — start
-that one by its real path.
+in `scripts/gate.sh --selftest`. `scripts/install-status.sh` gives the same answer since issue #43 (before: exit 2
+on the status call, a red selftest) and starts itself through links in its own `--selftest` as well (cases 9 and
+10, the second one with `--rehearse`).
 
 `scripts/skill-drift.sh` is deliberately **not** a gate check (it reads `~/.claude/skills`, which differs per
 machine and changes without a commit here); see "Skills that also exist in `~/.claude/skills`".
