@@ -15,7 +15,8 @@
 # folder the destination already has is left untouched (issue #8).
 # ~/.claude as destination overwrites the four global skills of the same name (README, section
 # "Skills that also exist in ~/.claude/skills") - run scripts/skill-drift.sh and compare first.
-# Exit: 0 installed · 2 no destination given
+# The source is always the repo this file belongs to, also when it is started through a symlink (issue #35).
+# Exit: 0 installed · 1 a copy failed or its own path cannot be resolved · 2 no destination given
 
 set -euo pipefail
 
@@ -48,7 +49,27 @@ esac
 # Superseded by issue #4 (a bare ./install.sh wrote into hl_claw_bot without being asked):
 # DEST="${1:-/home/rootvault/Dokumente/hl_claw_bot/.claude}"
 DEST="$1"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# real_path FILE — absolute path of FILE with every symlink resolved (issue #35; the function scripts/gate.sh
+# carries since issue #29): a link to the file by readlink (a chain of at most 40 links, relative targets read from
+# the link's own directory), a link in the directory part by cd -P. Only bash and readlink.
+real_path() {
+  local p="$1" d t n=0
+  while [ -L "$p" ] && [ "$n" -lt 40 ]; do
+    d="$(cd -P "$(dirname "$p")" && pwd)" || return 1
+    t="$(readlink "$p")" || return 1
+    case "$t" in /*) p="$t" ;; *) p="$d/$t" ;; esac
+    n=$((n + 1))
+  done
+  d="$(cd -P "$(dirname "$p")" && pwd)" || return 1
+  printf '%s/%s\n' "$d" "$(basename "$p")"
+}
+
+# Superseded by issue #35 (started through a symlink - say ~/bin/tgc-install - this was the directory of the link:
+# the install stopped with a cp error, or installed the agents/, commands/, skills/ of that directory if it had any):
+# SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF="$(real_path "${BASH_SOURCE[0]}")" || { echo "install.sh: cannot resolve its own path: ${BASH_SOURCE[0]} (nothing installed)" >&2; exit 1; }
+SCRIPT_DIR="$(dirname "$SELF")"
 
 echo "Installing tgc-dev-tools into: $DEST"
 
