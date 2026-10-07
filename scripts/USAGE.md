@@ -82,6 +82,21 @@ Output:  one "MISSING <kind>: <name>" or "STALE <kind>: <name>" line per gap, th
 Exit:    0 no gap · 1 gaps (or no README.md) · 2 usage
 ```
 
+## `selftest-last-line-probe.sh`
+```
+selftest-last-line-probe.sh — does a program's --selftest end with a fixed last line, green and red? Read-only.
+Usage:   scripts/selftest-last-line-probe.sh [--break CMD] PROGRAM   # PROGRAM is run as it is when executable, else with bash
+         scripts/selftest-last-line-probe.sh --selftest              # 9 cases on temp fixtures
+Options: --break CMD  the command the stand-in replaces in the second start: awk (default), grep, sed, diff,
+                      sort, cmp or find
+Output:  "plain: exit=N fail_lines=K last=<last line>" and "broken (CMD): exit=N fail_lines=K last=<last line>"
+         (fail_lines = lines that start with "selftest FAIL:"), then the last line
+         "selftest-last-line: ok runs=2 red=R" or "selftest-last-line: NOT FIXED not_fixed=K runs=2 red=R" or
+         "selftest-last-line: NOT MEASURED runs=2 red=0" (both runs fixed but none red: nothing known about a red run)
+Exit:    0 both runs fixed, at least one of them red · 1 at least one run not fixed · 3 no run was red ·
+         2 usage / PROGRAM is not a file / CMD is not one of the seven
+```
+
 ## `skill-drift.sh`
 ```
 skill-drift.sh — do the skills of this repo still match the copies of the same name in a skill store? Read-only.
@@ -97,4 +112,4 @@ Output:  the lines above, then the last line
 Exit:    0 no undeclared drift · 1 drift or a stale declaration · 2 usage / store or root is not a directory
 ```
 
-_7 programs._
+_8 programs._
