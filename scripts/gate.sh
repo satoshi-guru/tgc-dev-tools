@@ -66,6 +66,7 @@
 #          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or
 #          skills/ - issue #45, and 3 with one or all of them empty - issue #53, + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
 #          + 9 starts of the gate file with --fences - issue #66, 2 of them since issue #69,
+#          + 4 starts of install.sh whose "Done. Installed ..." line is read, 3 of them beside entries it does not copy - issue #54,
 #          + 7 runs of the step that prints the selftest's last line, each over a stand-in for the cases - issue #67)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 #          scripts/gate.sh --push-main [FILE ...]  # check 7 alone, as a readout (issue #25): one "FILE:LINE: command" line
@@ -1023,6 +1024,40 @@ install_link_case() {
     return 1
   fi
   return 0
+}
+
+# install_count_case WHAT DIR SRC DEST AGENTS COMMANDS SKILLS WANT — selftest helper (issue #54): starts the
+# installer file SRC/install.sh with bash in the directory DIR, with the destination DEST (a directory below the
+# selftest's temp dir that does not exist yet). The line before the last of its output is the one a session reads to
+# decide that the install was complete, so it has to say what was copied. Wanted: exit 0, nothing on stderr, the
+# line before the last is exactly "Done. Installed AGENTS agents, COMMANDS commands, SKILLS skills.", the output
+# carries AGENTS "[agent]", COMMANDS "[command]" and SKILLS "[skill]" lines, and DEST holds exactly the files WANT
+# (one "./path" per line, sorted by byte value). Before issue #54 the three numbers came from ls over the source
+# folders: an entry of agents/ or commands/ that is no *.md was counted and not installed.
+# Prints one "selftest FAIL" line with what differs below it and returns 1 when it does not hold.
+install_count_case() {
+  local out err code rest line want got na nc ns why=""
+  err="$(mktemp)"
+  out="$(cd "$2" && bash "$3/install.sh" "$4" 2>"$err")"
+  code=$?
+  [ "$code" -eq 0 ] || why="$why"$'\n'"    exit $code, want 0"
+  [ ! -s "$err" ] || why="$why"$'\n'"    stderr is not empty, first line: $(head -n 1 "$err")"
+  rm -f "$err"
+  want="Done. Installed $5 agents, $6 commands, $7 skills."
+  rest="${out%$'\n'*}"
+  line="${rest##*$'\n'}"
+  [ "$line" = "$want" ] || why="$why"$'\n'"    the line before the last: want '$want' got '$line'"
+  na="$(printf '%s\n' "$out" | grep -c '^  \[agent\] ')"
+  nc="$(printf '%s\n' "$out" | grep -c '^  \[command\] ')"
+  ns="$(printf '%s\n' "$out" | grep -c '^  \[skill\] ')"
+  [ "$na $nc $ns" = "$5 $6 $7" ] || why="$why"$'\n'"    [agent] / [command] / [skill] lines printed: want '$5 $6 $7' got '$na $nc $ns'"
+  got="$(cd "$4" 2>/dev/null && find . -type f | LC_ALL=C sort)"
+  if [ "$got" != "$8" ]; then
+    why="$why"$'\n'"    the destination holds other files than wanted; got:"$'\n'"$(printf '%s\n' "$got" | sed 's/^/      | /')"
+  fi
+  [ -z "$why" ] && return 0
+  echo "selftest FAIL: $1:$why"
+  return 1
 }
 
 # install_nosource_case WHAT DIR SRC DEST MISSING — selftest helper (issue #45): starts the installer file
@@ -2192,6 +2227,52 @@ FAIL: skills/x/shared -> ../../shared: $why51" '#51' || rc=1
   install_link_case "installer, file link with a relative target" "$t/cwd" "$t/rel/sub/install.sh" "$t/instdest/rel/.claude" "$inst" || rc=1
   install_link_case "installer, link to a link" "$t/cwd" "$t/chain/sub/install.sh" "$t/instdest/chain/.claude" "$inst" || rc=1
   install_link_case "installer, link to the repo directory" "$t/cwd" "$t/instdir/repo/install.sh" "$t/instdest/dir/.claude" "$inst" || rc=1
+  # installer count cases (issue #54): install.sh of this repo beside agents/, commands/ and skills/ that also hold
+  # entries the install does not copy. Started with bash in an empty directory, each time into a destination below
+  # the temp dir that does not exist. The line before the last ("Done. Installed N agents, M commands, K skills.")
+  # must count what was copied - as many as there are "[agent]", "[command]" and "[skill]" lines above it - and the
+  # entries that are not copied must not be in the destination.
+  #   countsrc/clean: agent a.md, command c.md, skill x and nothing else -> 1, 1, 1. The control: here the count of
+  #                   the source folders and the count of what was copied are the same number
+  #   countsrc/notes: the same plus agents/NOTES.txt, commands/NOTES.txt and skills/loose.txt - the measured case
+  #                   of the issue -> 1, 1, 1 (before: "Installed 2 agents, 2 commands, 1 skills.")
+  #   countsrc/mixed: agents a.md and b.md, command c.md, skills x and y, plus agents/NOTES.txt, a directory
+  #                   agents/drafts/, commands/NOTES.txt and commands/README (no ending) -> 2, 1, 2 (before:
+  #                   "Installed 4 agents, 3 commands, 2 skills."). Three different numbers, so a line that prints
+  #                   one counter three times is seen
+  #   countsrc/none:  agents/ with NOTES.txt only, command c.md, skills/ with loose.txt only - nothing to install in
+  #                   two of the three folders, which the loops skip since issue #53 -> 0, 1, 0 and nothing on
+  #                   stderr (before: "Installed 1 agents, 1 commands, 0 skills." behind an error line of ls, whose
+  #                   pattern skills/*/ had matched nothing)
+  # 4 starts: 1 on a source with nothing but what is installed, 3 on a source with entries that are not installed.
+  mkdir -p "$t/countsrc/none/agents" "$t/countsrc/none/commands" "$t/countsrc/none/skills"
+  cp "$(dirname "$SELF")/../install.sh" "$t/countsrc/none/install.sh"
+  printf 'notes, not an agent\n' > "$t/countsrc/none/agents/NOTES.txt"
+  printf 'cmd\n' > "$t/countsrc/none/commands/c.md"
+  printf 'a loose file, not a skill\n' > "$t/countsrc/none/skills/loose.txt"
+  local cinst cs
+  cinst="$(dirname "$SELF")/../install.sh"
+  for cs in clean notes mixed; do
+    mkdir -p "$t/countsrc/$cs/agents" "$t/countsrc/$cs/commands" "$t/countsrc/$cs/skills/x"
+    cp "$cinst" "$t/countsrc/$cs/install.sh"
+    printf -- '---\nname: a\ndescription: d\n---\nbody\n' > "$t/countsrc/$cs/agents/a.md"
+    printf 'cmd\n' > "$t/countsrc/$cs/commands/c.md"
+    printf -- '---\nname: x\ndescription: d\n---\nbody\n' > "$t/countsrc/$cs/skills/x/SKILL.md"
+  done
+  for cs in notes mixed; do
+    printf 'notes, not an agent\n' > "$t/countsrc/$cs/agents/NOTES.txt"
+    printf 'notes, not a command\n' > "$t/countsrc/$cs/commands/NOTES.txt"
+  done
+  printf 'a loose file, not a skill\n' > "$t/countsrc/notes/skills/loose.txt"
+  mkdir -p "$t/countsrc/mixed/agents/drafts" "$t/countsrc/mixed/skills/y"
+  printf -- '---\nname: b\ndescription: d\n---\nbody\n' > "$t/countsrc/mixed/agents/b.md"
+  printf 'no ending, not a command\n' > "$t/countsrc/mixed/commands/README"
+  printf -- '---\nname: y\ndescription: d\n---\nbody\n' > "$t/countsrc/mixed/skills/y/SKILL.md"
+  install_count_case "installer, Done line on a source with nothing but what is installed" "$t/cwd" "$t/countsrc/clean" "$t/countdest/clean/.claude" 1 1 1 "$inst" || rc=1
+  install_count_case "installer, Done line with a NOTES.txt in agents/ and commands/ and a loose file in skills/" "$t/cwd" "$t/countsrc/notes" "$t/countdest/notes/.claude" 1 1 1 "$inst" || rc=1
+  install_count_case "installer, Done line with files and a directory in agents/ and commands/ that are no *.md" "$t/cwd" "$t/countsrc/mixed" "$t/countdest/mixed/.claude" 2 1 2 \
+    $'./agents/a.md\n./agents/b.md\n./commands/c.md\n./skills/x/SKILL.md\n./skills/y/SKILL.md' || rc=1
+  install_count_case "installer, Done line with nothing to install in agents/ and skills/" "$t/cwd" "$t/countsrc/none" "$t/countdest/none/.claude" 0 1 0 './commands/c.md' || rc=1
   # installer source cases (issue #45): install.sh of this repo in a directory that is not a checkout of it,
   # started with bash in an empty directory, each time with a destination below the temp dir that does not exist.
   # Every start ends with exit 1 and one line that names the source and what it lacks, and the destination still

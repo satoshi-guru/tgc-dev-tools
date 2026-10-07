@@ -71,6 +71,10 @@ What the install does:
 - Files of the same name in the destination are **overwritten**; a skill's `evals/` folder is not installed.
 - Nothing in the destination is removed. An `evals/` folder that a skill in the destination already has is left
   untouched (until issue #8 the install deleted it).
+- One `[agent]`, `[command]` or `[skill]` line is printed per copied tool, and the line before the last sums them
+  up: `Done. Installed N agents, M commands, K skills.` The three numbers count what this run copied. Until
+  issue #54 they came from `ls` over the source folders, so an entry of `agents/` or `commands/` that is no `*.md`
+  (a `NOTES.txt`, a folder) was counted and not installed: `Installed 3 agents` after two `[agent]` lines.
 - The source is looked at before anything is written. When `agents/`, `commands/` or `skills/` is missing beside
   `install.sh` (a copy of the file on its own, say), the install stops with
   `install.sh: not a checkout of tgc-dev-tools: no <folders> in <source> (nothing installed)` and exit 1, and the

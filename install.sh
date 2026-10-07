@@ -13,6 +13,8 @@
 # their .gitignore, so the installed copies are untracked there; this repo is the versioned source.
 # Nothing in the destination is removed: a skill's evals/ folder is not installed, and an evals/
 # folder the destination already has is left untouched (issue #8).
+# The line before the last reads "Done. Installed N agents, M commands, K skills.": N, M and K count what this run
+# copied, one per "[agent]" / "[command]" / "[skill]" line above it (issue #54; before, ls over the source folders).
 # ~/.claude as destination overwrites the four global skills of the same name (README, section
 # "Skills that also exist in ~/.claude/skills") - run scripts/skill-drift.sh and compare first.
 # The source is always the repo this file belongs to, also when it is started through a symlink (issue #35).
@@ -95,6 +97,13 @@ if [ -n "$missing" ]; then
   exit 1
 fi
 
+# issue #54: one counter per kind, raised where the "[agent]" / "[command]" / "[skill]" line is printed, so the
+# "Done." line says what this run copied. n=$((n + 1)) and not ((n++)): under set -e the second ends the install
+# when n is 0.
+n_agents=0
+n_commands=0
+n_skills=0
+
 echo "Installing tgc-dev-tools into: $DEST"
 
 # Create target directories
@@ -115,6 +124,7 @@ for f in "$SCRIPT_DIR/agents/"*.md; do
   name=$(basename "$f")
   cp "$f" "$DEST/agents/$name"
   echo "  [agent] $name"
+  n_agents=$((n_agents + 1))
 done
 
 # Install commands
@@ -125,6 +135,7 @@ for f in "$SCRIPT_DIR/commands/"*.md; do
   name=$(basename "$f")
   cp "$f" "$DEST/commands/$name"
   echo "  [command] $name"
+  n_commands=$((n_commands + 1))
 done
 
 # Install skills (each skill is a directory; copy SKILL.md + any references/,
@@ -151,8 +162,13 @@ for skill_dir in "$SCRIPT_DIR/skills/"*/; do
     cp -r "$entry" "$DEST/skills/$name/"
   done
   echo "  [skill] $name"
+  n_skills=$((n_skills + 1))
 done
 
 echo ""
-echo "Done. Installed $(ls "$SCRIPT_DIR/agents" | wc -l) agents, $(ls "$SCRIPT_DIR/commands" | wc -l) commands, $(ls -d "$SCRIPT_DIR/skills"/*/ | wc -l) skills."
+# Superseded by issue #54 (the numbers came from ls over the source folders, not from what the loops copied: an
+# entry of agents/ or commands/ that is no *.md was counted and not installed - "Installed 3 agents" after 2 - and
+# a skills/ without a directory put an ls error line on stderr in front of this line):
+# echo "Done. Installed $(ls "$SCRIPT_DIR/agents" | wc -l) agents, $(ls "$SCRIPT_DIR/commands" | wc -l) commands, $(ls -d "$SCRIPT_DIR/skills"/*/ | wc -l) skills."
+echo "Done. Installed $n_agents agents, $n_commands commands, $n_skills skills."
 echo "Restart Claude Code to pick up new skills."
