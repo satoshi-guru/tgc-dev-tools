@@ -906,6 +906,48 @@ EOF
   push_block '' '   git switch main' '   git push' || rc=1
   push_block '' '    git switch main' "$F" 'git push' "$F" || rc=1
   push_block '' "$F" 'git switch main' "$F" '    git push' || rc=1
+  # block cases for check 7 (issue #41), one more form.
+  # form 10 — the subcommand in quotes (git "push", git 'switch', git "checkout"): 13 reported, 15 left alone. A word
+  # that is push, switch or checkout between one pair of quotes is that subcommand and the words after it are its
+  # arguments; closing punctuation behind the pair ends the command at the word, as it does behind the bare word.
+  push_block 1 'git "push" origin main' || rc=1
+  push_block 1 "git 'push' origin main" || rc=1
+  push_block 1 'git "push" origin "main"' || rc=1
+  push_block 1 'git -C ../x "push" -u origin HEAD:main' || rc=1
+  push_block 1 "\"git\" 'push' --all" || rc=1
+  push_block 1 'Then run `git "push" origin main`.' || rc=1
+  push_block 1 "sh -c \"git 'push' origin main\"" || rc=1
+  push_block 3 "$F" 'git "switch" main' 'git push' "$F" || rc=1
+  push_block 3 "$F" "git 'checkout' main" 'git push origin' "$F" || rc=1
+  push_block 3 "$F" 'git switch main' 'git "push"' "$F" || rc=1
+  push_block 2 '    git "switch" main' "    git 'push'" || rc=1
+  push_block 1 "sh -c 'git switch main && git \"push\"'" || rc=1
+  # the thirteenth was reported before issue #41 too. It is here because the new rule must not change it: the quote
+  # behind push closes the whole command, so the words after it are arguments of sh, not a remote and a ref - the
+  # push carries no ref and main is checked out.
+  push_block 3 "$F" 'git switch main' "sh -c 'git push' origin feat/x" "$F" || rc=1
+  push_block '' 'git "push" origin feature' || rc=1
+  push_block '' "git 'push' -u origin 'feat/x'" || rc=1
+  push_block '' 'git "push" origin main:feat/x' || rc=1
+  push_block '' 'git "status"' || rc=1
+  push_block '' 'git "pull" origin main' || rc=1
+  # the quote closes the whole command (no quote in front of push): the command ends at the word, as before
+  push_block '' "sh -c 'git push' origin main" || rc=1
+  # one quoted word for git, and a quote that is not closed by its own kind: neither is a pair around push
+  push_block '' "git 'push origin main'" || rc=1
+  push_block '' "git \"push' origin main" || rc=1
+  # a quoted switch to another branch clears the state. Before issue #41 it was not read, the state stayed on main
+  # and the push in the first of these four was reported at line 4 - a report for a push of feat/x.
+  push_block '' "$F" 'git switch main' 'git "switch" feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git "switch" main' "git 'switch' -c feat/x" 'git push' "$F" || rc=1
+  push_block '' "$F" 'git "checkout" feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git "switch" main' 'git push -u origin feat/x' "$F" || rc=1
+  push_block '' "sh -c 'git switch feat/x && git \"push\"'" || rc=1
+  # the last two are not left alone because they are harmless: they are the second form of issue #41, quotes or a
+  # backslash inside the command word, which was decided not to be built (named under "Still not seen" above
+  # readme_push_main with the reason). The shell runs both as git push origin main.
+  push_block '' 'gi"t" push origin main' || rc=1
+  push_block '' 'g\it push origin main' || rc=1
   # pushwrapped / pushonmain / pushflow: the same through run_checks, like pushmain above (block at line 20). The
   # wrapped command is named at the line where it starts (21), the push without a ref at its own line (22); the
   # step-3 block of the real README (switch to main, pull, install) stays accepted.
