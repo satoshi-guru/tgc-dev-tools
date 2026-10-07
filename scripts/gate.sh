@@ -27,6 +27,7 @@
 #      switch or checkout to main in the same code block. Since issue #30 also: git called by its path
 #      (/usr/bin/git push ...), a ref or command in single quotes, and lines that end in a carriage return (CRLF).
 #      Since issue #33 also: the command word in quotes ("git" push ..., "/usr/bin/git" push ...).
+#      Since issue #41 also: the subcommand in quotes (git "push" ..., git 'switch' main, git "checkout" main).
 #      Since issue #32 also: a push without a ref after a switch or checkout to main in the same indented code block
 #      (lines with four blanks or a tab in front, no fence; an empty line between them does not end the block).
 #      Since issue #25 the same reader also runs over every file install.sh copies into a project: agents/*.md,
@@ -34,7 +35,7 @@
 #      command line there as well, named by the path of the file below the root. No exceptions file exists: the
 #      readout of 2026-10-06 over the 18 installed files reported nothing (see the comment at the check)
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 24 broken fixtures and pass on 10 good ones (+ 29 line cases and 135 block cases for check 7,
+#          scripts/gate.sh --selftest # proves the checks fail on 24 broken fixtures and pass on 10 good ones (+ 29 line cases and 163 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or skills/ - issue #45,
 #          + 8 starts of the gate file with --push-main and 1 with --help - issue #25)
@@ -136,12 +137,28 @@ frontmatter_ok() {
 #   an indented code block (four blanks or a tab, no fence) - a switch to main in one of its lines and a push
 #   without a ref in the next are two lines outside a fence, so the state is gone (the fourth form of issue #30,
 #   left out there on purpose because it changes how the state is scoped; now issue #32)
+# Also reported since issue #41:
+#   - the subcommand in quotes: git "push" origin main, git 'push' origin main, and in a code block
+#     git "switch" main or git 'checkout' main followed by a push without a ref. A word that is push, switch or
+#     checkout between one pair of quotes (the same quote in front and behind) is that subcommand, and the words
+#     after it are its arguments. A quoted switch to another branch clears the state like a bare one (before, it
+#     was not read and the push after it was reported). Closing punctuation behind the pair ends the command at the
+#     word (sh -c 'git switch main && git "push"'), as it does behind the bare word; a quote behind the bare word
+#     still closes a whole command, so in sh -c 'git push' origin main the last two words are no remote and no ref.
+#     Not a pair, so not read: git 'push origin main' (one word for git) and git "push' origin main.
+# Superseded by the block above (issue #41), kept as a comment - this stood in "Still not seen", between the
+# variable forms and the bare carriage returns:
+#   the subcommand in quotes and quotes or a backslash inside the command word (git "push" origin main,
+#   gi"t" push, g\it push - issue #41; a backslash in front of the word, \git push, is seen)
 # Still not seen: git reached
 # through a variable or a command substitution ("$GIT" push, ${GIT} push, $(command -v git) push,
 # "$(command -v git)" push - left out of issue #33 on purpose: what a variable holds cannot be read from the text,
-# and a rule for "any variable followed by push" would be a guess); the subcommand in quotes and quotes or a
-# backslash inside the command word (git "push" origin main, gi"t" push, g\it push - issue #41; a backslash in
-# front of the word, \git push, is seen); a file whose only line ends are bare carriage
+# and a rule for "any variable followed by push" would be a guess); quotes or a backslash inside the command word
+# (gi"t" push origin main, g\it push origin main - the second form of issue #41, decided there not to be built: a
+# file that writes git this way does not do so by accident, and the check guards against a careless instruction,
+# not against one that is hidden on purpose; a backslash in front of the word, \git push, is seen); a quoted
+# option between git and the subcommand (git "-C" dir push origin main - the word does not start with a dash, so
+# it is taken for the subcommand); a file whose only line ends are bare carriage
 # returns (one line for awk, named in issue #33, not built there); a branch change by other means
 # (git switch --track origin/main,
 # git branch -M main, git clone, git worktree, cd into another clone), `git checkout <path>` without "--" (read as
@@ -199,9 +216,18 @@ readme_push_main() {
           }
           if (k > n) continue
           cmd = tok[k]; ended = 0
+          # issue #41 - the subcommand in quotes: push, switch or checkout between one pair of quotes (the same
+          # quote in front and behind) is that subcommand, and the words after it are its arguments. Closing
+          # punctuation behind the pair ends the command at the word, as it does behind the bare word (the last
+          # word of a quoted command or of a subshell: sh -c \047git "push"\047). The quote in front is what tells
+          # this from the rule below: push + quote with nothing in front closes a whole command.
+          if (cmd ~ /^("(push|switch|checkout)"|\047(push|switch|checkout)\047)[.,:;!?)"\047]*$/) {
+            ended = (length(cmd) > length(bare(cmd)) + 2)
+            cmd = bare(cmd)
+          }
           # "push." / "push)" / "push" + quote in a sentence, a subshell or a quoted command: the command ends at the
           # word itself
-          if (cmd ~ /^(push|switch|checkout)[.,:;!?)"\047]+$/) { ended = 1; cmd = bare(cmd) }
+          else if (cmd ~ /^(push|switch|checkout)[.,:;!?)"\047]+$/) { ended = 1; cmd = bare(cmd) }
           if (cmd == "push") {
             pos = 0; tags = 0
             for (j = k + 1; j <= n && !ended && !hit; j++) {
