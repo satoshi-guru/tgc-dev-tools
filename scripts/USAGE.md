@@ -45,8 +45,8 @@ Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; 
          scripts/gate.sh --selftest # last line "selftest ok" (exit 0) or "selftest FAILED fail_lines=N" (exit 1) - issue #67, N = the lines above it that start
          it proves the checks fail on 28 broken fixtures and pass on 12 good ones (+ 29 line cases and 316 block cases for check 7,
          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
-         + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or skil
-         + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
+         + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or
+         skills/ - issue #45, and 3 with one or all of them empty - issue #53, + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
 ```
 
 ## `install-status.sh`
