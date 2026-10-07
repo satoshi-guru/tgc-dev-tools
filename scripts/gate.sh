@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 # gate.sh — offline gate for tgc-dev-tools (fleet board gate, routing["gates"]).
 # Usage: scripts/gate.sh [--selftest | --push-main [FILE ...] | --fences [FILE ...] | --help]
-#        (each form is described under "Usage:" below the list of checks. This short line stands here since issue
-#        #66: the store's script-intake.py looks for the word in the first 40 lines of a script, and the list of
-#        checks had pushed the long form to line 42)
+# Each form is described under the second "Usage:" below the list of checks. This short line stands here since
+# issue #66: the store's script-intake.py looks for the word in the first 40 lines of a script, and the list of
+# checks had pushed the long form to line 42.
+# The card of this file in scripts/USAGE.md (issue #84) is the first line, the short line above and the first 10
+# lines of the second "Usage:" block: usage-cards.sh takes 12 lines per card and cuts each at 160 characters. So
+# that block starts with the forms, each with its last line and exit codes; what a readout prints above its last
+# line and the counts of the selftest stand behind them. A new form goes to the forms, a new count to the end, and
+# no line there is longer than 159 characters. The three lines below the short line ("Each form ... to line 42.")
+# start in the first column since then: indented they continued the short line and took, with the empty line
+# behind them, 4 of the 12 lines.
 #
 # What it checks (no internet, no dependencies beyond bash/python3 + the store's agent-file-check):
 #   0. the root is a checkout of this repo: it has install.sh and README.md (issue #29). A root without them is
@@ -60,25 +67,27 @@
 #      behind it, so a push instruction in a file behind it was installed and not read. A skill's own evals (not
 #      installed) stays out; a symlink to a file stays allowed and is read
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # last line "selftest ok" (exit 0) or "selftest FAILED fail_lines=N" (exit 1) - issue #67, N = the lines above it that start with "selftest FAIL:";
-#          it proves the checks fail on 28 broken fixtures and pass on 12 good ones (+ 29 line cases and 316 block cases for check 7,
-#          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
-#          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or
-#          skills/ - issue #45, and 3 with one or all of them empty - issue #53, + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
-#          + 9 starts of the gate file with --fences - issue #66, 2 of them since issue #69,
-#          + 4 starts of install.sh whose "Done. Installed ..." line is read, 3 of them beside entries it does not copy - issue #54,
-#          + 7 runs of the step that prints the selftest's last line, each over a stand-in for the cases - issue #67)
-#          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
-#          scripts/gate.sh --push-main [FILE ...]  # check 7 alone, as a readout (issue #25): one "FILE:LINE: command" line
-#          per reported command, then the last line "push-main: ok files=N" (exit 0) or "push-main: FOUND hits=K files=N"
-#          (exit 1); exit 2 and nothing read when a FILE is no readable file. Without FILE: the files check 7 reads in
-#          this repo, README.md and what install.sh installs
-#          scripts/gate.sh --fences [FILE ...]  # the code fences as check 7 reads them, as a readout (issue #66): one
-#          "FILE:LINE: kind: text" line per fence that opens with four or more characters (long), per line inside a
-#          fenced block that starts like a fence line and does not close it (inner) and per block nothing closes
-#          (unclosed), then the last line "fences: files=N blocks=B long=L inner=I unclosed=U" (exit 0, whatever the
-#          counts); exit 2 and nothing read when a FILE is no readable file. Without FILE: the same files as --push-main
+#          scripts/gate.sh --selftest # last line "selftest ok" (exit 0) or "selftest FAILED fail_lines=N" (exit 1; N = the "selftest FAIL:" lines above it)
+#          scripts/gate.sh --push-main [FILE ...]  # check 7 alone, as a readout: last line "push-main: ok files=N" (exit 0) or
+#              "push-main: FOUND hits=K files=N" (exit 1); exit 2 and nothing read when a FILE is no readable file
+#          scripts/gate.sh --fences [FILE ...]  # the code fences as check 7 reads them, as a readout: last line
+#              "fences: files=N blocks=B long=L inner=I unclosed=U" (exit 0, whatever the counts); exit 2 and nothing read when a FILE is no readable file
 #          scripts/gate.sh --help     # this header
+#          --push-main (issue #25) prints above its last line one "FILE:LINE: command" line per reported command. Without FILE: the files
+#              check 7 reads in this repo, README.md and what install.sh installs
+#          --fences (issue #66) prints above its last line one "FILE:LINE: kind: text" line per fence that opens with four or more characters
+#              (long), per line inside a fenced block that starts like a fence line and does not close it (inner) and per block nothing closes
+#              (unclosed). Without FILE: the same files as --push-main
+#          --selftest (its last line: issue #67) proves that the checks fail on 28 broken fixtures and pass on 12 good ones
+#              (+ 29 line cases and 316 block cases for check 7,
+#              + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
+#              + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35,
+#                and 4 in a source without agents/, commands/ or skills/ - issue #45, and 3 with one or all of them empty - issue #53,
+#              + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
+#              + 9 starts of the gate file with --fences - issue #66, 2 of them since issue #69,
+#              + 4 starts of install.sh whose "Done. Installed ..." line is read, 3 of them beside entries it does not copy - issue #54,
+#              + 7 runs of the step that prints the selftest's last line, each over a stand-in for the cases - issue #67)
+#              of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 set -uo pipefail
 
 # Superseded header lines of the earlier state of this branch (PR #9, 4 broken + 2 good fixtures), kept as a comment
