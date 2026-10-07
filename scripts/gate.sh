@@ -42,6 +42,10 @@
 #      Since issue #69 also: a line that starts with a run of backticks and carries a backtick behind the run is no
 #      fence line - it is a sentence that starts with inline code, opens no block and no longer keeps the state alive
 #      to the end of the file (or reads the blocks behind it inverted, which also hid a push inside them).
+#      Since issue #24 also: a push without a ref after two more ways to get main checked out in the same code block -
+#      a remote branch behind a track option (git switch --track origin/main, git checkout -t origin/main, also
+#      --no-track), and a rename with git branch -m / -M main. The name behind a new-branch option decides wherever
+#      it stands, and a rename away from main ends the state.
 #      Since issue #25 the same reader also runs over every file install.sh copies into a project: agents/*.md,
 #      commands/*.md and every file of a skill (hidden ones and symlinked ones too) except its evals/. One FAIL per
 #      command line there as well, named by the path of the file below the root. No exceptions file exists: the
@@ -51,7 +55,7 @@
 #      behind it, so a push instruction in a file behind it was installed and not read. A skill's own evals (not
 #      installed) stays out; a symlink to a file stays allowed and is read
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 28 broken fixtures and pass on 12 good ones (+ 29 line cases and 222 block cases for check 7,
+#          scripts/gate.sh --selftest # proves the checks fail on 28 broken fixtures and pass on 12 good ones (+ 29 line cases and 273 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or skills/ - issue #45,
 #          + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
@@ -290,6 +294,42 @@ FENCE_AWK='
 # variable forms and the bare carriage returns:
 #   the subcommand in quotes and quotes or a backslash inside the command word (git "push" origin main,
 #   gi"t" push, g\it push - issue #41; a backslash in front of the word, \git push, is seen)
+# Also reported since issue #24 (two of the six forms of that issue; the other four stand in "Still not seen" below,
+# each with its reason). What git does with every command named here was measured with
+# scripts/branch-after-probe.sh, which runs it in a throwaway clone (git 2.43.0, 2026-10-07):
+#   - a remote branch behind a track option: git switch --track origin/main, git checkout --track origin/main, the
+#     short -t, --track=direct / --track=inherit, and --no-track. git derives the name of the new local branch from
+#     the first word: refs/ and remotes/ in front are dropped, then everything up to the first slash, so
+#     origin/main, upstream/main and refs/remotes/origin/main give main, and origin/topic/main gives topic/main.
+#     A push without a ref (or of HEAD) behind such a command in the same code block is reported.
+#     --no-track was expected to be left alone; the probe showed that it derives the name in the same way (the
+#     branch then has no upstream, so git's default refuses the push without a ref and the push of HEAD goes to
+#     main).
+#   - the name behind a new-branch option decides, wherever the option stands (-c -C -b -B --create --force-create
+#     --orphan): git switch --track origin/main -c main is main, git switch -c feature --track origin/main and
+#     git switch --track origin/main -c feature are feature.
+#     No longer reported for that reason: git switch main -c feat/x followed by a push without a ref. The first
+#     word main alone decided before; the probe shows feat/x checked out.
+#   - git branch -m / -M / --move with the new name main: git branch -M main, git branch -m main,
+#     git branch --move main - the current branch is called main from then on. With the old name in front
+#     (git branch -m master main) the text does not say whether master is the current branch; it is read as if it
+#     were, which is the usual case and can only report more.
+#     No longer reported: git switch main, then git branch -m trunk (or git branch -m main trunk), then a push
+#     without a ref - the branch that is checked out is no longer called main (the probe: trunk, and the push is
+#     refused). git branch was not read before, so the state of the switch lived on.
+#     Unchanged: git branch without a move option (create, delete, copy with -c, list, -u) never changes what is
+#     checked out and leaves the state as it is; the rename of another branch (git branch -m feat/a feat/b) too.
+#     The subcommand in quotes (git "branch" -M main) is read like the bare word, as for push, switch and checkout.
+#   Accepted limit, as for git switch main since issue #18: "main is checked out" is what the text says, not what
+#   git would do with the push. Whether a push without a ref then reaches the remote main depends on the upstream of
+#   the branch and on push.default, which are not in the words of the command (after git branch -M main on a branch
+#   without an upstream git's default refuses it; git push -u origin HEAD always goes to main).
+# Superseded by the block above and the list below (issue #24), kept as a comment - this was the end of "Still not
+# seen", behind the bare carriage returns:
+#   a branch change by other means (git switch --track origin/main, git branch -M main, git clone, git worktree, cd
+#   into another clone), `git checkout <path>` without "--" (read as a branch, clears the state), state carried from
+#   one code block to the next, a push configured elsewhere (push.default, remote.*.push, an alias), and prose: the
+#   check reads commands, not sentences.
 # Still not seen: git reached
 # through a variable or a command substitution ("$GIT" push, ${GIT} push, $(command -v git) push,
 # "$(command -v git)" push - left out of issue #33 on purpose: what a variable holds cannot be read from the text,
@@ -299,11 +339,19 @@ FENCE_AWK='
 # not against one that is hidden on purpose; a backslash in front of the word, \git push, is seen); a quoted
 # option between git and the subcommand (git "-C" dir push origin main - the word does not start with a dash, so
 # it is taken for the subcommand); a file whose only line ends are bare carriage
-# returns (one line for awk, named in issue #33, not built there); a branch change by other means
-# (git switch --track origin/main,
-# git branch -M main, git clone, git worktree, cd into another clone), `git checkout <path>` without "--" (read as
-# a branch, clears the state), state carried from one code block to the next, a push configured elsewhere
-# (push.default, remote.*.push, an alias), and prose: the check reads commands, not sentences.
+# returns (one line for awk, named in issue #33, not built there); and prose: the check reads commands, not
+# sentences.
+# Still not seen, the four forms of issue #24 that were decided not to be built (2026-10-07), one reason each:
+#   - git clone + cd, git worktree add, cd into another clone: the push then runs in another directory. That is
+#     not a state of this code block, and which branch is checked out there is not in the text
+#   - `git checkout <path>` without "--" (git checkout README.md): a path and a branch cannot be told apart from
+#     the text, so the word is read as a branch and clears the state. `git checkout -- <path>` leaves it
+#   - a switch to main in one code block and the push without a ref in the next: the state ends with the block, as
+#     scoped in issue #18. Carrying it further would report on prose that stands between two blocks
+#   - a continuation backslash followed by blanks: only a backslash as the very last character of the line joins
+#     it with the next one - that is the shell's rule too, there the backslash escapes the blank and joins nothing
+#   - a push whose target comes from configuration (push.default, remote.*.push, branch.*.merge set with
+#     git branch -u, an alias): it is not in the words of the command
 readme_push_main() {
   # issue #66: the fence rule (fence_run, fence_change) comes from FENCE_AWK, in front of the program
   awk "$FENCE_AWK"'
@@ -399,13 +447,16 @@ readme_push_main() {
           # punctuation behind the pair ends the command at the word, as it does behind the bare word (the last
           # word of a quoted command or of a subshell: sh -c \047git "push"\047). The quote in front is what tells
           # this from the rule below: push + quote with nothing in front closes a whole command.
-          if (cmd ~ /^("(push|switch|checkout)"|\047(push|switch|checkout)\047)[.,:;!?)"\047]*$/) {
+          # Superseded by issue #24, kept as a comment - the two tests knew three subcommands; branch is the fourth:
+          #   if (cmd ~ /^("(push|switch|checkout)"|\047(push|switch|checkout)\047)[.,:;!?)"\047]*$/) {
+          #   else if (cmd ~ /^(push|switch|checkout)[.,:;!?)"\047]+$/) { ended = 1; cmd = bare(cmd) }
+          if (cmd ~ /^("(push|switch|checkout|branch)"|\047(push|switch|checkout|branch)\047)[.,:;!?)"\047]*$/) {
             ended = (length(cmd) > length(bare(cmd)) + 2)
             cmd = bare(cmd)
           }
           # "push." / "push)" / "push" + quote in a sentence, a subshell or a quoted command: the command ends at the
           # word itself
-          else if (cmd ~ /^(push|switch|checkout)[.,:;!?)"\047]+$/) { ended = 1; cmd = bare(cmd) }
+          else if (cmd ~ /^(push|switch|checkout|branch)[.,:;!?)"\047]+$/) { ended = 1; cmd = bare(cmd) }
           if (cmd == "push") {
             pos = 0; tags = 0
             for (j = k + 1; j <= n && !ended && !hit; j++) {
@@ -430,18 +481,66 @@ readme_push_main() {
             if (!hit && onmain && pos <= 1 && !tags) hit = 1
             if (hit) at = tl[i]
           } else if (cmd == "switch" || cmd == "checkout") {
-            first = ""; paths = 0; detach = 0
+            # issue #24 - two more things are read from the words of a switch or checkout. track: an option that makes
+            # git derive the name of a new local branch from a remote branch (--track, -t, --track=<mode> and, as
+            # measured with scripts/branch-after-probe.sh, --no-track too). nb: the word behind a new-branch option
+            # (-c -C -b -B --create --force-create --orphan), wherever the option stands - behind the start point as
+            # well (git switch origin/main -c feat/x).
+            first = ""; paths = 0; detach = 0; track = 0; nb = ""; wantnb = 0
             for (j = k + 1; j <= n && !ended; j++) {
               t = tok[j]
               if (issep(t)) break
               t = bare(t)
               if (t == "") continue
               if (t == "--") { paths = 1; break }
-              if (t ~ /^-./) { if (t == "--detach" || t == "-d") detach = 1; continue }
+              # Superseded by issue #24, kept as a comment - of the options only --detach was read:
+              #   if (t ~ /^-./) { if (t == "--detach" || t == "-d") detach = 1; continue }
+              if (t ~ /^-./) {
+                if (t == "--detach" || t == "-d") detach = 1
+                else if (t ~ /^(--track|--track=.*|-t|--no-track)$/) track = 1
+                else if (t ~ /^(-c|-C|-b|-B|--create|--force-create|--orphan)$/) wantnb = 1
+                continue
+              }
+              if (wantnb) { if (nb == "") nb = t; wantnb = 0 }
               if (first == "") first = t
             }
+            # Superseded by issue #24, kept as a comment - the first word alone decided:
+            #   if (detach) onmain = 0
+            #   else if (!paths && first != "") onmain = (first == "main")
+            # The branch that is checked out afterwards: the name behind a new-branch option when there is one; else,
+            # with a track option, the part of the first word behind its first slash (refs/ and remotes/ in front are
+            # dropped first, as git does), so <remote>/main is main and <remote>/topic/main is not; else the first
+            # word. A track option in front of the bare word main keeps the verdict it had (git rejects the command).
             if (detach) onmain = 0
-            else if (!paths && first != "") onmain = (first == "main")
+            else if (!paths && first != "") {
+              if (nb != "") onmain = (nb == "main")
+              else if (track) {
+                tb = first; sub(/^refs\//, "", tb); sub(/^remotes\//, "", tb)
+                onmain = (first == "main" || tb ~ /^[^\/]+\/main$/)
+              }
+              else onmain = (first == "main")
+            }
+          } else if (cmd == "branch") {
+            # issue #24 - git branch -m / -M / --move renames a branch. One word behind the options: the current
+            # branch gets that name, so the state is set by the name main and cleared by any other. Two words, old
+            # and new: the text does not say whether old is the current branch. The new name main sets the state
+            # (the usual case, git branch -m master main, renames the branch one stands on); the old name main with
+            # another new name clears it; anything else leaves it. Without a move option git branch creates,
+            # deletes, copies or lists and never changes what is checked out, so the state stays as it is.
+            mv = 0; cnt = 0; last = ""; prev = ""
+            for (j = k + 1; j <= n && !ended; j++) {
+              t = tok[j]
+              if (issep(t)) break
+              t = bare(t)
+              if (t == "") continue
+              if (t ~ /^-./) { if (t ~ /^(-m|-M|--move)$/) mv = 1; continue }
+              prev = last; last = t; cnt++
+            }
+            if (mv && cnt == 1) onmain = (last == "main")
+            else if (mv && cnt == 2) {
+              if (last == "main") onmain = 1
+              else if (prev == "main") onmain = 0
+            }
           }
         }
         if (hit) { print at ": " text; found = 1 }
@@ -1414,6 +1513,84 @@ EOF
   push_block 4 "$F" 'git switch main' "${F}x${F} y" 'git push' "$F" || rc=1
   # the command inside the inline code is read as before: a push to main in such a sentence is a report at its line
   push_block 1 "${F}git push origin main${F} is what this check reports." || rc=1
+  # block cases for check 7 (issue #24), two more ways to get main checked out. What git does with each command was
+  # measured with scripts/branch-after-probe.sh (git 2.43.0, 2026-10-07); its selftest holds the same forms.
+  # form 14 — a remote branch <remote>/main behind --track, -t, --track=<mode> or --no-track: git derives the name
+  # of the new local branch from the part behind the first slash, so main is checked out. 12 reported, 13 left alone.
+  # reported: the three commands of the issue, the short option at checkout too, the long option with a mode,
+  # another remote, the long name of the remote branch, and --no-track (the probe: it derives main as well)
+  push_block 3 "$F" 'git switch --track origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout --track origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git switch -t origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout -t origin/main' 'git push origin' "$F" || rc=1
+  push_block 3 "$F" 'git switch --track=direct origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git switch --track upstream/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git switch --track refs/remotes/origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git switch --no-track origin/main' 'git push -u origin HEAD' "$F" || rc=1
+  # in one line, in an indented block, and with the subcommand in quotes (form 8)
+  push_block 1 'git switch --track origin/main && git push' || rc=1
+  push_block 2 '    git checkout --track origin/main' '    git push' || rc=1
+  push_block 3 "$F" 'git "switch" --track origin/main' 'git push' "$F" || rc=1
+  # a new-branch option behind the start point names the branch: here it is main
+  push_block 3 "$F" 'git switch --track origin/main -c main' 'git push' "$F" || rc=1
+  # left alone: a new-branch option names another branch, in front of the start point or behind it
+  push_block '' "$F" 'git switch -c feature --track origin/main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch --track origin/main -c feature' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git checkout -b feat/y --track origin/main' 'git push' "$F" || rc=1
+  # no longer reported: the start point main with a new branch of another name behind it (the probe: feat/x is
+  # checked out). Before, the first word main alone decided.
+  push_block '' "$F" 'git switch main -c feat/x' 'git push' "$F" || rc=1
+  # the remote branch is not main: another name, main as the last part of a longer name, a name that starts with main
+  push_block '' "$F" 'git switch --track origin/feature' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch --track origin/topic/main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch --track origin/maintenance' 'git push' "$F" || rc=1
+  # no option that derives a name: git switch rejects the command, git checkout detaches (as before)
+  push_block '' "$F" 'git switch origin/main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git checkout origin/main' 'git push' "$F" || rc=1
+  # the state is cleared and scoped as for git switch main: another branch behind it, a push of another branch, the
+  # next code block (named under "Still not seen"), and a sentence that names the command
+  push_block '' "$F" 'git switch --track origin/main' 'git switch feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch --track origin/main' 'git push -u origin feat/x' "$F" || rc=1
+  push_block '' "$F" 'git switch --track origin/main' "$F" '' "$F" 'git push' "$F" || rc=1
+  push_block '' 'After `git switch --track origin/main` the install runs.' 'Then `git push` the branch.' || rc=1
+  # form 15 — git branch -m / -M / --move with the new name main: the current branch is called main from then on.
+  # 12 reported, 14 left alone.
+  # reported: the two commands of the issue, the long option, the form with the old name in front, a push of HEAD
+  push_block 3 "$F" 'git branch -M main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git branch -m main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git branch --move main' 'git push origin' "$F" || rc=1
+  push_block 3 "$F" 'git branch -m master main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git branch -M main' 'git push -u origin HEAD' "$F" || rc=1
+  # in one line, in an indented block, with the subcommand in quotes, with options between git and branch, and with
+  # a command between the rename and the push
+  push_block 1 'git branch -M main && git push' || rc=1
+  push_block 2 '    git branch -M main' '    git push' || rc=1
+  push_block 3 "$F" 'git "branch" -M main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git -C ../x branch -M main' 'git -C ../x push' "$F" || rc=1
+  push_block 4 "$F" 'git branch -M main' 'git remote add origin https://example.org/x.git' 'git push' "$F" || rc=1
+  # reported before too, and still: main is checked out and git branch does not change that - the rename of another
+  # branch, a new branch that is only created
+  push_block 4 "$F" 'git switch main' 'git branch -m feat/a feat/b' 'git push' "$F" || rc=1
+  push_block 4 "$F" 'git switch main' 'git branch feat/x' 'git push' "$F" || rc=1
+  # left alone: the new name is not main, or the command renames nothing (create, delete, copy, list, set upstream -
+  # a push configured elsewhere is named under "Still not seen")
+  push_block '' "$F" 'git branch -M trunk' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git branch -M maintenance' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git branch -m feat/a main-menu' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git branch main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git branch -d main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git branch -c main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git branch --list main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git branch -u origin/main' 'git push' "$F" || rc=1
+  # no longer reported: main was checked out and is renamed away (the probe: trunk is checked out, the push without a
+  # ref is refused). Before, git branch was not read and the state of the switch lived on.
+  push_block '' "$F" 'git switch main' 'git branch -m trunk' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git branch -m main trunk' 'git push' "$F" || rc=1
+  # the state is cleared and scoped as for git switch main
+  push_block '' "$F" 'git branch -M main' 'git switch feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git branch -M main' 'git push -u origin feat/x' "$F" || rc=1
+  push_block '' "$F" 'git branch -M main' "$F" '' "$F" 'git push' "$F" || rc=1
+  push_block '' 'After `git branch -M main` the remote is added.' 'Then `git push` the branch.' || rc=1
   # pushwrapped / pushonmain / pushflow: the same through run_checks, like pushmain above (block at line 20). The
   # wrapped command is named at the line where it starts (21), the push without a ref at its own line (22); the
   # step-3 block of the real README (switch to main, pull, install) stays accepted.
