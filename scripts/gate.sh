@@ -43,8 +43,12 @@
 #      commands/*.md and every file of a skill (hidden ones and symlinked ones too) except its evals/. One FAIL per
 #      command line there as well, named by the path of the file below the root. No exceptions file exists: the
 #      readout of 2026-10-06 over the 18 installed files reported nothing (see the comment at the check)
+#      Since issue #51 also: a symlink to a directory below skills/<name>/ is rejected, one FAIL per link, named by
+#      its path below the root and its target. install.sh copies such a link as a link and the reader does not go
+#      behind it, so a push instruction in a file behind it was installed and not read. A skill's own evals (not
+#      installed) stays out; a symlink to a file stays allowed and is read
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 24 broken fixtures and pass on 10 good ones (+ 29 line cases and 205 block cases for check 7,
+#          scripts/gate.sh --selftest # proves the checks fail on 28 broken fixtures and pass on 12 good ones (+ 29 line cases and 205 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or skills/ - issue #45,
 #          + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
