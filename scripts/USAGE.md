@@ -26,11 +26,11 @@ Usage: scripts/gate.sh [--selftest | --push-main [FILE ...] | --fences [FILE ...
        checks had pushed the long form to line 42)
 
 Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-         scripts/gate.sh --selftest # proves the checks fail on 28 broken fixtures and pass on 12 good ones (+ 29 line cases and 205 block cases for check 7,
+         scripts/gate.sh --selftest # proves the checks fail on 28 broken fixtures and pass on 12 good ones (+ 29 line cases and 222 block cases for check 7,
          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or skil
          + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
-         + 7 starts of the gate file with --fences - issue #66)
+         + 9 starts of the gate file with --fences - issue #66, 2 of them since issue #69)
 ```
 
 ## `install-status.sh`

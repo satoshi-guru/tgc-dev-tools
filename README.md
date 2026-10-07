@@ -417,7 +417,9 @@ What it checks:
    closed only by a line of the character that opened it (backticks or tildes), with a run at least as long as the
    opening one and nothing but blanks behind it; a line of the other character, a shorter run, or a run with text
    behind it is content of the block and does not end it, and a block that nothing closes runs to the end of the
-   file. Accepted: a push of a branch
+   file. Since issue #69 a line that starts with three or more backticks and carries a backtick behind them is no
+   fence line: it is a sentence that starts with inline code and opens no block (before, it opened one that nothing
+   closed, and every fenced block behind it was read inverted). Accepted: a push of a branch
    (`git push -u origin feat/x`, also `maintenance` or `feat/main-menu`), a switch to `main` that is followed by a
    pull and no push (step 3 of "Update Workflow"), and prose without the command. The check reads the command, not
    the sentence around it: a quoted push to `main` is rejected even after a "never", so describe the rule in words
@@ -459,7 +461,10 @@ exit 2 and nothing read for a FILE that is no readable file). `long` is a block 
 tildes, `inner` a line inside a block that starts like a fence line and does not close it (the other character, a
 shorter run, or text behind the run), `unclosed` a block that nothing closes before the end of the file. On
 2026-10-07, before this section was written, the 19 files had 62 blocks and none of the three kinds — so the
-closing rule of issue #66 changed no report in this repo.
+closing rule of issue #66 changed no report in this repo. A line that starts with backticks and carries a backtick
+behind them (inline code at the start of a sentence) is no fence line since issue #69 and is counted nowhere; the
+same day, with this section in place, the 19 files had 63 blocks and none of the three kinds before and after that
+change.
 
 `scripts/readme-listing-check.sh` can be run on its own. It compares the tree in "What's Inside" and the `###`
 headings with `agents/`, `commands/`, `skills/` on disk, in both directions:
