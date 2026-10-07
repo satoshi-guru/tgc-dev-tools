@@ -437,7 +437,12 @@ What it checks:
    every session of the projects it is installed into, so the same wording rule holds there: describe a push rule
    in words, do not quote the command with its target. There is no exceptions file, because nothing needed one
    (2026-10-06: 0 reports in 18 installed files); a command that is right in the repo it is installed into gets a
-   declared exception when the first one exists
+   declared exception when the first one exists.
+   Since issue #51 a symlink to a directory inside a skill is rejected as well, with
+   `FAIL: skills/<name>/<path> -> <target>: symlink to a directory inside a skill …`, one line per link at any depth.
+   `install.sh` copies such a link as a link, so the files behind it reach a project only on the machine of the
+   install, and the check does not read them — a skill carries its own files. Put the files into the skill instead.
+   A skill's own `evals` is not installed and stays out of the rule; a symlink to a file stays allowed and is read
 
 Check 7 can be run on its own, as a readout that changes nothing:
 

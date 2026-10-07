@@ -50,8 +50,12 @@
 #      commands/*.md and every file of a skill (hidden ones and symlinked ones too) except its evals/. One FAIL per
 #      command line there as well, named by the path of the file below the root. No exceptions file exists: the
 #      readout of 2026-10-06 over the 18 installed files reported nothing (see the comment at the check)
+#      Since issue #51 also: a symlink to a directory below skills/<name>/ is rejected, one FAIL per link, named by
+#      its path below the root and its target. install.sh copies such a link as a link and the reader does not go
+#      behind it, so a push instruction in a file behind it was installed and not read. A skill's own evals (not
+#      installed) stays out; a symlink to a file stays allowed and is read
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 24 broken fixtures and pass on 10 good ones (+ 29 line cases and 273 block cases for check 7,
+#          scripts/gate.sh --selftest # proves the checks fail on 28 broken fixtures and pass on 12 good ones (+ 29 line cases and 273 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or skills/ - issue #45,
 #          + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
@@ -554,8 +558,11 @@ readme_push_main() {
 # A symlink to a file is printed by the path of the link, so its content is read: install.sh copies an agent or
 # command with a plain cp, which copies what the link points to, and an entry of a skill with cp -r, which copies
 # the link itself - on the machine of the install that link still leads to the same content. Not printed: a link
-# that leads to no file, and what lies behind a link to a directory (cp -r copies that link, find does not enter
-# it).
+# that leads to no file.
+# A symlink to a directory inside a skill is not entered here (cp -r copies that link, find does not go behind it),
+# and since issue #51 it does not have to be: run_checks rejects every such link (skill_dir_links below), so a tree
+# the gate accepts has no installed content behind one. Until then this comment listed the form as not read, and a
+# push instruction in a file behind such a link passed check 7 (measured with the fixture tooldirlink).
 # Superseded first form of this function (same branch, before the symlink cases toolagentlink and toolskilllink):
 # the agents and commands loop also tested [ ! -L "$f" ] and the skills loop ran find "$e" -type f -print0, so a
 # linked file was never read and a command behind it passed check 7.
@@ -573,6 +580,31 @@ tool_files() {
         while IFS= read -r -d '' f; do
           [ -f "$f" ] && printf '%s\0' "$f"
         done < <(find "$e" \( -type f -o -type l \) -print0)
+      done
+    done
+  } | LC_ALL=C sort -z
+}
+
+# skill_dir_links ROOT — prints, each ended by a NUL byte and sorted by byte value, the path of every symlink to a
+# directory below a skills/<name>/ of ROOT (issue #51), at any depth of what install.sh copies. The entries of a
+# skill are taken the way tool_files and install.sh take them (three patterns, the entry named evals skipped), so a
+# skill's own evals - a folder or a link - stays out: it is not installed. find does not follow a link, so each
+# link is printed once and nothing behind it is walked; [ -d ] is true for a link that leads to a directory,
+# wherever that directory is (outside the skill, outside the repo, or a folder of the same skill).
+# Not printed: a symlink to a file (allowed, tool_files prints it and check 7 reads it), a link that leads nowhere,
+# and a skills/<name> that is itself a link to a directory (install.sh and tool_files both go through it, so its
+# files are installed as files and read).
+skill_dir_links() {
+  local root="$1" f d e
+  {
+    for d in "$root"/skills/*/; do
+      [ -d "$d" ] || continue
+      for e in "$d"* "$d".[!.]* "$d"..?*; do
+        [ -e "$e" ] || continue
+        [ "$(basename "$e")" = "evals" ] && continue
+        while IFS= read -r -d '' f; do
+          [ -d "$f" ] && printf '%s\0' "$f"
+        done < <(find "$e" -type l -print0)
       done
     done
   } | LC_ALL=C sort -z
@@ -806,6 +838,14 @@ run_checks() {
   # installed into (which push rule holds in hl_claw_bot is the open decision of issue #47) gets a declared
   # exception - a file with one line per exception and its reason, like scripts/skill-drift-declared.txt - when
   # the first one exists; until then such a command is reworded as a sentence or the gate stays red.
+  # issue #51: the reader below does not go behind a symlink to a directory inside a skill, and install.sh copies
+  # such a link as a link - on the machine of the install it still leads to its files, in a project elsewhere it
+  # leads nowhere. Either way the skill does not carry its own files, so the link itself is rejected: one FAIL per
+  # link (skill_dir_links), named by its path below the root and by the target as the link carries it. With that, a
+  # tree this check accepts has no installed file it did not read. A symlink to a file stays allowed and is read.
+  while IFS= read -r -d '' f; do
+    fail "${f#"$root"/} -> $(readlink "$f"): symlink to a directory inside a skill (issue #51: install.sh copies the link and not the files behind it, and check 7 does not read them - a skill carries its own files)"
+  done < <(skill_dir_links "$root")
   while IFS= read -r -d '' f; do
     while IFS= read -r out; do
       [ -n "$out" ] || continue
@@ -969,10 +1009,12 @@ fences_case() {
 # tool_file_case WHAT ROOT WANT — selftest helper (check 7, issue #25): run_checks on the fixture ROOT must fail, and
 # its FAIL lines must be exactly WANT - one line that names the file below ROOT, the line and the command. So the
 # fixture is rejected by check 7 for that file and by nothing else. Prints the difference and returns 1 otherwise.
+# A fourth argument names the issue of the case in the "accepted" line (default #25); the directory link cases of
+# issue #51 pass it, and one of them passes a WANT of two lines.
 tool_file_case() {
   local out got
   if out="$(run_checks "$2" 2>&1)"; then
-    echo "selftest FAIL: $1 accepted (issue #25)"
+    echo "selftest FAIL: $1 accepted (issue ${4:-#25})"
     return 1
   fi
   got="$(printf '%s\n' "$out" | grep '^FAIL: ')"
@@ -1703,6 +1745,64 @@ EOF
   printf '\nThe change reaches `main` through a pull request, never by a push to `main`:\n\n```bash\ngit push -u origin feat/x\n```\n' >> "$t/toolbranch/agents/a.md"
   out="$(run_checks "$t/toolbranch" 2>&1)" || {
     echo "selftest FAIL: agent file with 'git push -u origin feat/x' rejected:"
+    printf '%s\n' "$out"
+    rc=1
+  }
+  # directory link cases (check 7, issue #51): the listed fixture plus a symlink to a directory inside skills/x.
+  # install.sh copies an entry of a skill with cp -r, which copies such a link as a link, and tool_files does not go
+  # behind it - so until issue #51 a push instruction in a file behind the link was installed (on the machine of the
+  # install the link still leads there) and never read. The rule: one FAIL per symlink to a directory below
+  # skills/<name>/, named by the path of the link below the root and by its target as the link carries it. 4
+  # rejected, 2 accepted. shared/flow.md is a file outside skills/ with 'git push origin main' in a code block.
+  #   tooldirlink:     skills/x/shared -> an absolute path outside the skill. Exactly one FAIL line, the one for the
+  #                    link: checks 1 to 6 are green on this tree (measured: before the rule this fixture was
+  #                    accepted), and the push behind the link is not reported, because nothing behind it is read
+  #   tooldirlinkrel:  skills/x/shared -> ../../shared, a relative path that leaves the skill. In a project the link
+  #                    leads nowhere (there is no shared/ beside its skills/), so check 4 is red on this tree as well -
+  #                    the case wants the line for the link and the lines of check 4, the whole set
+  #   tooldirlinkdeep: skills/x/references/more -> the same directory, one folder deeper -> rejected by that path
+  #   tooldirlinkin:   skills/x/alias -> references, a folder of the same skill with no push in it. Rejected too: the
+  #                    rule asks whether the entry is a link to a directory, not where it leads
+  #   toolevalslink:   skills/x/evals -> the directory with the push. install.sh does not install the entry named
+  #                    evals, so nothing of it reaches a project -> accepted
+  #   toolfilelinkok:  skills/x/alias.md -> SKILL.md, a symlink to a file with no push in it -> accepted (a link to
+  #                    a file stays allowed and is read: toolskilllink above)
+  local why51='symlink to a directory inside a skill (issue #51: install.sh copies the link and not the files behind it, and check 7 does not read them - a skill carries its own files)'
+  local why4='install.sh did not copy every entry of every skill (evals/ aside, hidden entries included)'
+  cp -r "$t/listed" "$t/tooldirlink"
+  mkdir -p "$t/tooldirlink/shared"
+  printf '# flow\n\n```bash\ngit push origin main\n```\n' > "$t/tooldirlink/shared/flow.md"
+  ln -s "$t/tooldirlink/shared" "$t/tooldirlink/skills/x/shared"
+  tool_file_case "symlink inside a skill to a directory that holds a file with 'git push origin main'" "$t/tooldirlink" "FAIL: skills/x/shared -> $t/tooldirlink/shared: $why51" '#51' || rc=1
+  cp -r "$t/listed" "$t/tooldirlinkrel"
+  mkdir -p "$t/tooldirlinkrel/shared"
+  printf '# flow\n\n```bash\ngit push origin main\n```\n' > "$t/tooldirlinkrel/shared/flow.md"
+  ln -s ../../shared "$t/tooldirlinkrel/skills/x/shared"
+  tool_file_case "relative symlink inside a skill to a directory outside it" "$t/tooldirlinkrel" "FAIL: $why4
+FAIL: skills/x/shared -> ../../shared: $why51" '#51' || rc=1
+  cp -r "$t/listed" "$t/tooldirlinkdeep"
+  mkdir -p "$t/tooldirlinkdeep/shared" "$t/tooldirlinkdeep/skills/x/references"
+  printf '# flow\n\n```bash\ngit push origin main\n```\n' > "$t/tooldirlinkdeep/shared/flow.md"
+  ln -s "$t/tooldirlinkdeep/shared" "$t/tooldirlinkdeep/skills/x/references/more"
+  tool_file_case "symlink to a directory one folder deep inside a skill" "$t/tooldirlinkdeep" "FAIL: skills/x/references/more -> $t/tooldirlinkdeep/shared: $why51" '#51' || rc=1
+  cp -r "$t/listed" "$t/tooldirlinkin"
+  mkdir -p "$t/tooldirlinkin/skills/x/references"
+  printf '# flow\n\nno command here\n' > "$t/tooldirlinkin/skills/x/references/flow.md"
+  ln -s references "$t/tooldirlinkin/skills/x/alias"
+  tool_file_case "symlink inside a skill to a folder of the same skill" "$t/tooldirlinkin" "FAIL: skills/x/alias -> references: $why51" '#51' || rc=1
+  cp -r "$t/listed" "$t/toolevalslink"
+  mkdir -p "$t/toolevalslink/shared"
+  printf '# flow\n\n```bash\ngit push origin main\n```\n' > "$t/toolevalslink/shared/flow.md"
+  ln -s "$t/toolevalslink/shared" "$t/toolevalslink/skills/x/evals"
+  out="$(run_checks "$t/toolevalslink" 2>&1)" || {
+    echo "selftest FAIL: a skill's evals that is a symlink to a directory (not installed) rejected (issue #51):"
+    printf '%s\n' "$out"
+    rc=1
+  }
+  cp -r "$t/listed" "$t/toolfilelinkok"
+  ln -s SKILL.md "$t/toolfilelinkok/skills/x/alias.md"
+  out="$(run_checks "$t/toolfilelinkok" 2>&1)" || {
+    echo "selftest FAIL: symlink inside a skill to a file with no push in it rejected (issue #51):"
     printf '%s\n' "$out"
     rc=1
   }
