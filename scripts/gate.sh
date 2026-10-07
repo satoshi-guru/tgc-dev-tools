@@ -46,6 +46,11 @@
 #      a remote branch behind a track option (git switch --track origin/main, git checkout -t origin/main, also
 #      --no-track), and a rename with git branch -m / -M main. The name behind a new-branch option decides wherever
 #      it stands, and a rename away from main ends the state.
+#      Since issue #75 also: the options of a switch or checkout are read the way git reads them - the word behind
+#      --conflict (and behind --pathspec-from-file at checkout) is its value and not the branch
+#      (git switch --conflict diff3 main), short options in one word are read letter by letter
+#      (git switch -ft origin/main), and a name glued to a new-branch option counts (git switch -cmain,
+#      git checkout -bmain, git switch --create=main).
 #      Since issue #25 the same reader also runs over every file install.sh copies into a project: agents/*.md,
 #      commands/*.md and every file of a skill (hidden ones and symlinked ones too) except its evals/. One FAIL per
 #      command line there as well, named by the path of the file below the root. No exceptions file exists: the
@@ -55,7 +60,7 @@
 #      behind it, so a push instruction in a file behind it was installed and not read. A skill's own evals (not
 #      installed) stays out; a symlink to a file stays allowed and is read
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 28 broken fixtures and pass on 12 good ones (+ 29 line cases and 273 block cases for check 7,
+#          scripts/gate.sh --selftest # proves the checks fail on 28 broken fixtures and pass on 12 good ones (+ 29 line cases and 316 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or skills/ - issue #45,
 #          + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
@@ -330,6 +335,36 @@ FENCE_AWK='
 #   into another clone), `git checkout <path>` without "--" (read as a branch, clears the state), state carried from
 #   one code block to the next, a push configured elsewhere (push.default, remote.*.push, an alias), and prose: the
 #   check reads commands, not sentences.
+# Also reported since issue #75 (all three forms of that issue were built; what was not stands in "Still not seen"
+# below). The options of git switch / git checkout are read the way git reads them; the list is what git switch -h
+# and git checkout -h of git 2.43.0 print, and what git does with every command named here was measured with
+# scripts/branch-after-probe.sh (2026-10-07):
+#   - an option that takes a value as its own word: --conflict <style> at both commands, --pathspec-from-file
+#     <file> at checkout. The word behind it is the value and is skipped, so in git switch --conflict diff3 main
+#     the branch is main (before, diff3 was read as the branch, which cleared the state). With "=" the value is
+#     part of the word and nothing is skipped (--conflict=diff3 main, reported before too). The other long options
+#     with a value were read already (--create, --force-create, --orphan), and --recurse-submodules takes its value
+#     only with "=": the probe shows git switch --recurse-submodules main on main, as the reader had it.
+#     No longer reported: git switch --conflict main feat/x followed by a push without a ref - main is the value
+#     there (git rejects the style and stays where it was).
+#     --pathspec-from-file: with a file that names no path git switches the branch (the probe, with /dev/null).
+#     With a file that names a path git checkout is documented to restore files and change no branch - that was
+#     not run, the probe's clone has no file. The text does not say which file it is, so the word behind the file
+#     is read as the branch, as the word behind git checkout always is. That can only report more.
+#   - short options written as one word: every letter is an option of its own. d is --detach; t is --track and
+#     takes the rest of the word as its mode (-tdirect); c C b B take the rest of the word as the name of the new
+#     branch, or the next word when nothing is left; every other letter takes no value. So git switch -ft
+#     origin/main and git checkout -qt origin/main are read like -t origin/main.
+#     No longer reported: git switch -fd main followed by a push without a ref - the word carries the letter of
+#     --detach (the probe: detached). Before, only the whole word -d was a detach option.
+#   - the name glued to a new-branch option: git switch -cmain, -Cmain, git checkout -bmain, -Bmain, behind other
+#     letters too (-fcmain), and the long options with "=" (--create=main, --force-create=main, --orphan=main).
+#     Quotes in front of the glued name are dropped (-c"main"). Before, the word was skipped as an unknown option.
+#     No longer reported: git switch main, then git switch -cfeat/x (or git checkout -bfeat/x, or
+#     git switch --create=feat/x), then a push without a ref - the probe shows feat/x checked out; and
+#     git switch -cfeat/x main, where main is the start point.
+#   As before, the four letters c C b B and the long names are read at both commands, although git switch knows
+#   only -c / -C and git checkout only -b / -B (git rejects the other pair). That can only report more.
 # Still not seen: git reached
 # through a variable or a command substitution ("$GIT" push, ${GIT} push, $(command -v git) push,
 # "$(command -v git)" push - left out of issue #33 on purpose: what a variable holds cannot be read from the text,
@@ -352,6 +387,13 @@ FENCE_AWK='
 #     it with the next one - that is the shell's rule too, there the backslash escapes the blank and joins nothing
 #   - a push whose target comes from configuration (push.default, remote.*.push, branch.*.merge set with
 #     git branch -u, an alias): it is not in the words of the command
+# Still not seen, found while issue #75 was built and not built there (2026-10-07), one reason each:
+#   - a long option of switch / checkout cut down to a unique prefix, which git accepts (git switch --conf diff3
+#     main, git switch --tr origin/main, git switch --cre=main pass; git switch --det main is reported although git
+#     detaches). Which prefix is unique depends on the option list of the git version (git 2.43.0 rejects --c as
+#     ambiguous), so a rule would have to carry that list. Measured and filed as issue #77
+#   - an option with a value that a git version other than 2.43.0 knows: the two value options and the short
+#     letters are the ones git switch -h and git checkout -h print here; no other version was run
 readme_push_main() {
   # issue #66: the fence rule (fence_run, fence_change) comes from FENCE_AWK, in front of the program
   awk "$FENCE_AWK"'
@@ -486,7 +528,7 @@ readme_push_main() {
             # measured with scripts/branch-after-probe.sh, --no-track too). nb: the word behind a new-branch option
             # (-c -C -b -B --create --force-create --orphan), wherever the option stands - behind the start point as
             # well (git switch origin/main -c feat/x).
-            first = ""; paths = 0; detach = 0; track = 0; nb = ""; wantnb = 0
+            first = ""; paths = 0; detach = 0; track = 0; nb = ""; wantnb = 0; skipval = 0
             for (j = k + 1; j <= n && !ended; j++) {
               t = tok[j]
               if (issep(t)) break
@@ -495,12 +537,53 @@ readme_push_main() {
               if (t == "--") { paths = 1; break }
               # Superseded by issue #24, kept as a comment - of the options only --detach was read:
               #   if (t ~ /^-./) { if (t == "--detach" || t == "-d") detach = 1; continue }
+              # Superseded by issue #75, kept as a comment - every option was tested as a whole word, so -ft was no
+              # track option, -cmain no new-branch option, and the word behind --conflict was taken for the branch:
+              #   if (t ~ /^-./) {
+              #     if (t == "--detach" || t == "-d") detach = 1
+              #     else if (t ~ /^(--track|--track=.*|-t|--no-track)$/) track = 1
+              #     else if (t ~ /^(-c|-C|-b|-B|--create|--force-create|--orphan)$/) wantnb = 1
+              #     continue
+              #   }
+              # issue #75 - an option word is read the way git reads it (git switch -h and git checkout -h of git
+              # 2.43.0 are the list). A long option is split at its first "=": the name in front, the value behind.
+              # A word of short options is read letter by letter: d is --detach, t is --track and takes the rest of
+              # the word as its mode, c C b B take the rest of the word as the name of the new branch, or the next
+              # word when nothing is left; every other letter (f m q l p 2 3) takes no value. --conflict and
+              # --pathspec-from-file take their value as the next word, which is then no branch (skipval).
               if (t ~ /^-./) {
-                if (t == "--detach" || t == "-d") detach = 1
-                else if (t ~ /^(--track|--track=.*|-t|--no-track)$/) track = 1
-                else if (t ~ /^(-c|-C|-b|-B|--create|--force-create|--orphan)$/) wantnb = 1
+                if (t ~ /^--/) {
+                  eq = index(t, "="); nm = eq ? substr(t, 1, eq - 1) : t; val = eq ? substr(t, eq + 1) : ""
+                  if (nm == "--detach") detach = 1
+                  else if (nm == "--track" || nm == "--no-track") track = 1
+                  else if (nm ~ /^--(create|force-create|orphan)$/) {
+                    if (!eq) wantnb = 1
+                    else {
+                      sub(/^["\047]+/, "", val)
+                      if (nb == "") nb = val
+                      if (first == "") first = val
+                    }
+                  }
+                  else if (nm ~ /^--(conflict|pathspec-from-file)$/ && !eq) skipval = 1
+                } else {
+                  for (p = 2; p <= length(t); p++) {
+                    ch = substr(t, p, 1)
+                    if (ch == "d") detach = 1
+                    else if (ch == "t") { track = 1; break }
+                    else if (ch ~ /^[cCbB]$/) {
+                      val = substr(t, p + 1); sub(/^["\047]+/, "", val)
+                      if (val == "") wantnb = 1
+                      else {
+                        if (nb == "") nb = val
+                        if (first == "") first = val
+                      }
+                      break
+                    }
+                  }
+                }
                 continue
               }
+              if (skipval) { skipval = 0; continue }
               if (wantnb) { if (nb == "") nb = t; wantnb = 0 }
               if (first == "") first = t
             }
@@ -1591,6 +1674,74 @@ EOF
   push_block '' "$F" 'git branch -M main' 'git push -u origin feat/x' "$F" || rc=1
   push_block '' "$F" 'git branch -M main' "$F" '' "$F" 'git push' "$F" || rc=1
   push_block '' 'After `git branch -M main` the remote is added.' 'Then `git push` the branch.' || rc=1
+  # block cases for check 7 (issue #75), how the options of a switch or checkout are read - three ways to write one
+  # that the reader of issue #24 took for something else. What git does with each command was measured with
+  # scripts/branch-after-probe.sh (git 2.43.0, 2026-10-07); its selftest holds the same forms.
+  # form 16 — an option that takes a value as its own word (--conflict <style>, and at checkout
+  # --pathspec-from-file <file>): the word behind it is the value, not the branch. 8 reported, 4 left alone.
+  # reported: the command of the issue, at checkout too, the three styles, in one line, with a track option behind
+  # it, and the file option of checkout (the probe: with a file that names no path git switches the branch)
+  push_block 3 "$F" 'git switch --conflict diff3 main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout --conflict merge main' 'git push origin' "$F" || rc=1
+  push_block 1 'git switch --conflict zdiff3 main && git push' || rc=1
+  push_block 3 "$F" 'git switch --conflict diff3 --track origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout --pathspec-from-file list.txt main' 'git push' "$F" || rc=1
+  push_block 4 "$F" 'git switch feat/x' 'git switch --conflict diff3 main' 'git push -u origin HEAD' "$F" || rc=1
+  # reported before too, and still: the value glued to the option with "=", and an option whose value is optional -
+  # git takes the word behind --recurse-submodules for the branch (the probe: main is checked out)
+  push_block 3 "$F" 'git switch --conflict=diff3 main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git switch --recurse-submodules main' 'git push' "$F" || rc=1
+  # left alone: the branch behind the value is another one; and the value itself is called main (git rejects the
+  # style and stays where it was - before, the word main behind the option was read as the branch)
+  push_block '' "$F" 'git switch --conflict diff3 feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git switch --conflict diff3 feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch --conflict main feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git checkout --pathspec-from-file main feat/x' 'git push' "$F" || rc=1
+  # form 17 — short options written as one word (-ft, -qt, -fd): every letter is an option of its own, and a
+  # letter that takes a value takes the rest of the word. 6 reported, 5 left alone.
+  # reported: the command of the issue, at checkout, another letter in front, the mode glued to -t, in an indented
+  # block, and a new-branch letter at the end of the word with the name main behind it (reported before too)
+  push_block 3 "$F" 'git switch -ft origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout -ft origin/main' 'git push origin' "$F" || rc=1
+  push_block 3 "$F" 'git checkout -qt upstream/main' 'git push -u origin HEAD' "$F" || rc=1
+  push_block 3 "$F" 'git switch -tdirect origin/main' 'git push' "$F" || rc=1
+  push_block 2 '    git switch -ft origin/main' '    git push' || rc=1
+  push_block 3 "$F" 'git switch -fc main' 'git push' "$F" || rc=1
+  # left alone: the remote branch is not main; the word carries the letter of --detach (before, -fd was no detach
+  # option, and the word main behind it set the state); and a new-branch letter with another name behind it
+  push_block '' "$F" 'git switch -ft origin/feature' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch -ft origin/topic/main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch -fd main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git switch -fd origin/main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git switch -fc feat/x' 'git push' "$F" || rc=1
+  # form 18 — the name glued to a new-branch option: -cmain, -Cmain, -bmain, -Bmain, behind other letters too
+  # (-fcmain), and the long options with "=" (--create=main, --force-create=main, --orphan=main).
+  # 11 reported, 9 left alone.
+  # reported: the two commands of the issue, the forced letters, a start point behind the name, another letter in
+  # front, the three long options, the name in quotes, and the subcommand in quotes (form 8)
+  push_block 3 "$F" 'git switch -cmain' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout -bmain' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git switch -Cmain origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout -Bmain' 'git push origin' "$F" || rc=1
+  push_block 3 "$F" 'git switch -fcmain' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git switch --create=main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git switch --force-create=main origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout --orphan=main' 'git push -u origin HEAD' "$F" || rc=1
+  push_block 3 "$F" 'git switch -c"main"' 'git push' "$F" || rc=1
+  push_block 1 'git switch -cmain && git push' || rc=1
+  push_block 3 "$F" 'git "switch" -cmain' 'git push' "$F" || rc=1
+  # left alone: the glued name is another one - before, the word was skipped as an option, so the state of the
+  # switch to main in front of it lived on, and a start point main behind it set the state
+  push_block '' "$F" 'git switch main' 'git switch -cfeat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git checkout main' 'git checkout -bfeat/x' 'git push origin' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git switch --create=feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch -cfeat/x main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch -cmaintenance' 'git push' "$F" || rc=1
+  # the state is cleared and scoped as for git switch main
+  push_block '' "$F" 'git switch -cmain' 'git switch feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch -cmain' 'git push -u origin feat/x' "$F" || rc=1
+  push_block '' "$F" 'git switch -cmain' "$F" '' "$F" 'git push' "$F" || rc=1
+  push_block '' 'After `git switch -cmain` the install runs.' 'Then `git push` the branch.' || rc=1
   # pushwrapped / pushonmain / pushflow: the same through run_checks, like pushmain above (block at line 20). The
   # wrapped command is named at the line where it starts (21), the push without a ref at its own line (22); the
   # step-3 block of the real README (switch to main, pull, install) stays accepted.

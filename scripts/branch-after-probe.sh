@@ -3,7 +3,8 @@
 #
 # What it does: runs each COMMAND with the real git in a throwaway clone and prints what is true afterwards. It is
 # the measurement behind check 7 of scripts/gate.sh (issue #24): that check reads the words of a command and decides
-# "main is checked out from here on"; this program asks git itself.
+# "main is checked out from here on"; this program asks git itself. Since issue #75 the selftest also holds how git
+# reads the options of switch / checkout (a value as its own word, short options in one word, a glued name).
 # Every COMMAND gets a fresh clone of a fresh bare remote "origin" with the branches main, feature, maintenance and
 # topic/main. Before the COMMAND the clone stands on the local branch work (made from origin/feature, no upstream)
 # and has no local branch main. Nothing outside the temp directory is read or written: the user's and the system's
@@ -11,7 +12,7 @@
 # Usage:   scripts/branch-after-probe.sh 'COMMAND' ['COMMAND' ...]   # a COMMAND is a git command line without the word
 #                                                                   # git; several steps are joined with " ; "
 #          scripts/branch-after-probe.sh 'switch --track origin/main' 'switch main ; branch -m trunk'
-#          scripts/branch-after-probe.sh --selftest                  # 26 commands against the answers written down here
+#          scripts/branch-after-probe.sh --selftest                  # 58 commands against the answers written down here
 #          scripts/branch-after-probe.sh --help                      # this header
 # Output:  one line per COMMAND "branch=B push=P push-head=H exit=N | COMMAND", then the last line
 #          "branch-after: commands=N on-main=K"
@@ -150,6 +151,50 @@ selftest() {
   # a rename away from main ends the state; the rename of another branch leaves it
   want 'trunk refused trunk 0' 'switch main ; branch -m trunk' || rc=1
   want 'main main main 0' 'switch main ; branch -m work feat' || rc=1
+  # issue #75 - three ways to write an option of switch / checkout, as measured 2026-10-07 with git 2.43.0.
+  # An option that takes a value as its own word: the word behind --conflict is the style, the branch comes after
+  # it. --recurse-submodules takes its value only with "=", so the word behind it is the branch. A style that git
+  # does not know (here the word main) is rejected and the clone stays on work. --pathspec-from-file with a file
+  # that names no path switches the branch.
+  want 'main main main 0' 'switch --conflict diff3 main' || rc=1
+  want 'main main main 0' 'checkout --conflict diff3 main' || rc=1
+  want 'main main main 0' 'switch --conflict=diff3 main' || rc=1
+  want 'main main main 0' 'switch --recurse-submodules main' || rc=1
+  want 'feature feature feature 0' 'switch --conflict diff3 feature' || rc=1
+  want 'work refused work any' 'switch --conflict main feature' || rc=1
+  want 'main main main 0' 'checkout --pathspec-from-file /dev/null main' || rc=1
+  # short options written as one word: every letter is an option, -t takes the rest of the word as its mode (so
+  # -tf is the unknown mode f and git rejects it), and the letter d detaches
+  want 'main main main 0' 'switch -ft origin/main' || rc=1
+  want 'main main main 0' 'checkout -ft origin/main' || rc=1
+  want 'main main main 0' 'switch -qt origin/main' || rc=1
+  want 'main main main 0' 'switch -tdirect origin/main' || rc=1
+  want 'feature feature feature 0' 'switch -ft origin/feature' || rc=1
+  want 'work refused work any' 'switch -tf origin/main' || rc=1
+  want 'detached refused refused 0' 'switch -fd origin/main' || rc=1
+  want 'detached refused refused 0' 'switch --track origin/main ; switch -fd main' || rc=1
+  # the name glued to a new-branch option, short and long. The new branch has no upstream (and after --orphan no
+  # commit), so git's default refuses the push without a ref
+  want 'main refused main 0' 'switch -cmain' || rc=1
+  want 'main refused main 0' 'switch -Cmain' || rc=1
+  want 'main refused main 0' 'checkout -bmain' || rc=1
+  want 'main refused main 0' 'checkout -Bmain' || rc=1
+  want 'main refused main 0' 'switch -fcmain' || rc=1
+  want 'main refused main 0' 'switch --create=main' || rc=1
+  want 'main refused main 0' 'switch --force-create=main' || rc=1
+  want 'main refused refused 0' 'switch --orphan=main' || rc=1
+  # ... and with another name glued to it: main is left, also when main is the start point behind the name
+  want 'feat/x refused feat/x 0' 'switch main ; switch -cfeat/x' || rc=1
+  want 'feat/x refused feat/x 0' 'switch main ; checkout -bfeat/x' || rc=1
+  want 'feat/x refused feat/x 0' 'switch main ; switch --create=feat/x' || rc=1
+  want 'feat/x refused feat/x 0' 'switch --track origin/main ; switch -cfeat/x main' || rc=1
+  # what check 7 does not read (issue #77, named under "Still not seen" in scripts/gate.sh): git accepts a long
+  # option cut down to a unique prefix, and rejects one that is ambiguous (--c: --create or --conflict)
+  want 'main main main 0' 'switch --conf diff3 main' || rc=1
+  want 'main main main 0' 'switch --tr origin/main' || rc=1
+  want 'main refused main 0' 'switch --cre=main' || rc=1
+  want 'detached refused refused 0' 'switch --track origin/main ; switch --det main' || rc=1
+  want 'work refused work any' 'switch --c main' || rc=1
   # the readout itself: one line per command, the count line, and exit 2 without a command
   out="$(probe 'switch --track origin/main' 'branch main')"
   case "$out" in

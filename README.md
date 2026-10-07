@@ -425,7 +425,13 @@ What it checks:
    track option in front of a remote branch `<remote>/main` (`--track`, `-t`, and `--no-track` as well — git
    derives the local name `main` from it), and a rename of the current branch to `main` with `git branch -m` or
    `-M`. The name behind a new-branch option decides wherever it stands, and a rename away from `main` ends the
-   state. What git really does with each of these was measured with `scripts/branch-after-probe.sh` (below).
+   state. Since issue #75 the options of a switch or checkout are read the way git reads them: the word behind
+   `--conflict` (and behind `--pathspec-from-file` at checkout) is its value and not the branch
+   (`git switch --conflict diff3 main`), short options written as one word are read letter by letter
+   (`git switch -ft origin/main`), and a name glued to a new-branch option counts (`git switch -cmain`,
+   `git checkout -bmain`, `git switch --create=main`). Not read: a long option cut down to a prefix
+   (`git switch --tr origin/main`, issue #77).
+   What git really does with each of these was measured with `scripts/branch-after-probe.sh` (below).
    Accepted: a push of a branch
    (`git push -u origin feat/x`, also `maintenance` or `feat/main-menu`), a switch to `main` that is followed by a
    pull and no push (step 3 of "Update Workflow"), and prose without the command. The check reads the command, not
@@ -511,7 +517,7 @@ temp directory is touched.
 
 ```bash
 scripts/branch-after-probe.sh 'switch --track origin/main' 'branch -M main'   # a command is written without the word git; steps are joined with " ; "
-scripts/branch-after-probe.sh --selftest                                      # 26 commands against the answers written down in the file
+scripts/branch-after-probe.sh --selftest                                      # 58 commands against the answers written down in the file
 ```
 
 One `branch=B push=P push-head=H exit=N | COMMAND` line per command, then `branch-after: commands=N on-main=K`
