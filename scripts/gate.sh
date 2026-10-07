@@ -30,12 +30,14 @@
 #      Since issue #41 also: the subcommand in quotes (git "push" ..., git 'switch' main, git "checkout" main).
 #      Since issue #32 also: a push without a ref after a switch or checkout to main in the same indented code block
 #      (lines with four blanks or a tab in front, no fence; an empty line between them does not end the block).
+#      Since issue #49 also: a line of three backticks or tildes is a fence line only with at most three blanks and
+#      no tab in front; indented further it is one more line of that indented block and no longer ends the state.
 #      Since issue #25 the same reader also runs over every file install.sh copies into a project: agents/*.md,
 #      commands/*.md and every file of a skill (hidden ones and symlinked ones too) except its evals/. One FAIL per
 #      command line there as well, named by the path of the file below the root. No exceptions file exists: the
 #      readout of 2026-10-06 over the 18 installed files reported nothing (see the comment at the check)
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 24 broken fixtures and pass on 10 good ones (+ 29 line cases and 163 block cases for check 7,
+#          scripts/gate.sh --selftest # proves the checks fail on 24 broken fixtures and pass on 10 good ones (+ 29 line cases and 182 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or skills/ - issue #45,
 #          + 8 starts of the gate file with --push-main and 1 with --help - issue #25)
@@ -132,7 +134,27 @@ frontmatter_ok() {
 #     list item (CommonMark counts the indent from the list item's content; this check counts it from the start of
 #     the line), so the state is also kept across indented prose and across a block that is nested deeper. That can
 #     only report more, and only where a switch to main and a push without a ref really stand in indented lines
-#     with nothing unindented between them. A fence line indented by four blanks is still read as a fence.
+#     with nothing unindented between them. Since issue #49 a line of three backticks or tildes that is indented
+#     by four blanks, or by a tab, is no fence line (see the block of issue #49 below).
+# Superseded by the sentence above (issue #49), kept as a comment - this was the last sentence of the block:
+#   A fence line indented by four blanks is still read as a fence.
+# Also reported since issue #49:
+#   - the fence line has an indent limit, the CommonMark rule: a line that starts with three backticks or three
+#     tildes is a fence line only with at most three blanks and no tab in front of them. Indented by four blanks,
+#     or by a tab (alone or after blanks), it is a line like any other: outside a fence one more line of an indented
+#     code block, which keeps the state, and inside a fence content, which does not close it. So a switch to main, such
+#     a line and a push without a ref in one indented block are reported (before, the line toggled the fence and
+#     cleared the state). The join of a wrapped command follows the same rule: a line that ends in a backslash is
+#     joined with such a line, and still not with a real fence line.
+#     No longer reported: what stood behind an indented line of three backticks that nothing closed - it opened a
+#     fence that lived to the end of the file, and the state lived with it across lines that are not indented.
+#     Accepted limit: a fenced block inside a list item whose fence lines are indented by four blanks or more is a
+#     real fence in CommonMark; this check does not see it as one. Its lines are then lines of one indented block,
+#     so a switch to main and a push without a ref inside it are reported as before - but the state is no longer
+#     ended by its fence lines: it lives as long as the lines stay indented (empty lines included), also from one
+#     such block into the next of the same list item. That can only report more.
+#     Not changed: fences of more than three characters, the rule that a closing fence has to be as long as the
+#     opening one and of the same character, and an info string - any fence line toggles, as before.
 # Superseded by the block above (issue #32), kept as a comment - this stood at the head of "Still not seen":
 #   an indented code block (four blanks or a tab, no fence) - a switch to main in one of its lines and a push
 #   without a ref in the next are two lines outside a fence, so the state is gone (the fourth form of issue #30,
@@ -177,7 +199,11 @@ readme_push_main() {
         n = 0; text = ""; nx = r
         do {
           s = L[nx]; cont = 0
-          if (s ~ /\\$/ && nx < NR && L[nx + 1] !~ /^[ \t]*(```|~~~)/) {
+          # Superseded by issue #49, kept as a comment - the fence test of the join had no limit on the indent:
+          #   if (s ~ /\\$/ && nx < NR && L[nx + 1] !~ /^[ \t]*(```|~~~)/) {
+          # A fence line has at most three blanks and no tab in front (see the state lines below); a line of three
+          # backticks or tildes that is indented further is no fence, so a wrapped command is joined with it too.
+          if (s ~ /\\$/ && nx < NR && L[nx + 1] !~ /^ ? ? ?(```|~~~)/) {
             cont = 1; sub(/[ \t]*\\$/, "", s)
           }
           if (nx > r) sub(/^[ \t]+/, "", s)
@@ -196,7 +222,14 @@ readme_push_main() {
         # line to the next and across an empty line (blanks and tabs only); it is cleared at the first indented
         # line after a line that was not (a switch to main in a line that is not indented lives for that line
         # only, as before) and at every line with text that is not indented that far.
-        if (L[r] ~ /^[ \t]*(```|~~~)/) { fence = !fence; onmain = 0; block = 0 }
+        # Superseded by issue #49, kept as a comment - the fence test had no limit on the indent, so an indented
+        # line of three backticks or tildes toggled the fence and cleared the state:
+        #   if (L[r] ~ /^[ \t]*(```|~~~)/) { fence = !fence; onmain = 0; block = 0 }
+        # A fence line has at most three blanks and no tab in front (the CommonMark rule). Indented by four blanks,
+        # or by a tab after at most three blanks, such a line is read like any other: outside a fence it falls
+        # into the indented-block branch below and keeps the state, inside a fence it is content and does not
+        # close the fence.
+        if (L[r] ~ /^ ? ? ?(```|~~~)/) { fence = !fence; onmain = 0; block = 0 }
         else if (!fence) {
           if (L[r] ~ /^[ \t]*$/) { }
           else if (L[r] ~ /^(    | ? ? ?\t)/) { if (!block) onmain = 0; block = 1 }
@@ -974,6 +1007,43 @@ EOF
   # readme_push_main with the reason). The shell runs both as git push origin main.
   push_block '' 'gi"t" push origin main' || rc=1
   push_block '' 'g\it push origin main' || rc=1
+  # block cases for check 7 (issue #49), the fence line. It belongs to form 9 (issue #32) and uses its T.
+  # form 11 — a line of three backticks or tildes is a fence line only with at most three blanks and no tab in front
+  # (the CommonMark rule); indented further it is one more line of an indented code block, or of the fence it stands
+  # in: 9 reported, 10 left alone.
+  # the form of the issue: switch to main, the indented line, push without a ref - backticks, tildes, a tab, a tab
+  # after two blanks, and the six lines of the measurement in the issue (text, empty line, block)
+  push_block 3 '    git switch main' "    $F" '    git push' || rc=1
+  push_block 3 '    git switch main' '    ~~~' '    git push' || rc=1
+  push_block 3 "${T}git switch main" "${T}$F" "${T}git push" || rc=1
+  push_block 3 "  ${T}git switch main" "  ${T}~~~" "  ${T}git push origin" || rc=1
+  push_block 5 'An indented block:' '' '    git switch main' "    $F" '    git push' || rc=1
+  # the list-item form: fence lines and commands all indented by four blanks. The fence is no longer seen as one, but
+  # all its lines are lines of one indented block and the state lives across them - reported before issue #49 as well
+  push_block 5 '1. Update main:' '' "    ${F}bash" '    git switch main' '    git push' "    $F" || rc=1
+  # inside a real fence the indented line is content and does not close it: the state lives on to the push
+  push_block 4 "$F" 'git switch main' "    $F" 'git push' "$F" || rc=1
+  # the accepted limit, measured: two fenced blocks in one list item, indented by four blanks, are one indented block
+  # for this check (an empty line belongs to it), so the switch in the first reaches the push in the second. Before
+  # issue #49 each of the four lines ended the state. It can only report more.
+  push_block 8 '- step:' '' "    $F" '    git switch main' "    $F" '' "    $F" '    git push' "    $F" || rc=1
+  # the second place of the rule, the join of a wrapped command: a line that ends in a backslash is joined with an
+  # indented line of three tildes too, it is no fence. Built for that place - ~~~ stands where the remote is.
+  push_block 1 '    git push \' '    ~~~ origin main' || rc=1
+  # left alone. With three blanks in front the line is a real fence: it ends the state, as before
+  push_block '' '    git switch main' "   $F" '    git push' || rc=1
+  push_block '' '    git switch main' '   ~~~' '    git push' || rc=1
+  push_block '' "   $F" '   git switch main' "   $F" '    git push' || rc=1
+  push_block '' "$F" 'git switch main' "   $F" 'git push' || rc=1
+  push_block '' '    git push \' '   ~~~ origin main' || rc=1
+  # an indented line of three backticks opens no fence: before issue #49 it opened one that nothing closed, the state
+  # lived to the end of the file and the push in line 4 was reported
+  push_block '' "    $F" 'git switch main' 'Some prose.' 'git push' || rc=1
+  # the indented line changes nothing about what ends or clears the state of an indented block
+  push_block '' '    git switch main' "    $F" 'Then, on the work branch:' '    git push' || rc=1
+  push_block '' '    git switch main' "    $F" '    git switch feat/x' '    git push' || rc=1
+  push_block '' '    git add README.md' "    $F" '    git push' || rc=1
+  push_block '' '- a:' '' "    $F" '    git switch main' "    $F" '' '- b:' '' "    $F" '    git push' "    $F" || rc=1
   # pushwrapped / pushonmain / pushflow: the same through run_checks, like pushmain above (block at line 20). The
   # wrapped command is named at the line where it starts (21), the push without a ref at its own line (22); the
   # step-3 block of the real README (switch to main, pull, install) stays accepted.

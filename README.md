@@ -410,7 +410,10 @@ What it checks:
    without a ref (or of `HEAD`) after a switch or checkout to `main`. A code block is a fenced one or, since
    issue #32, an indented one: lines with four blanks or a tab in front, where an empty line between them does not
    end the block and the first line with text that is not indented that far does. The check cannot tell such a
-   block from the indented continuation paragraph of a list item, so it reads both the same way. Accepted: a push of a branch
+   block from the indented continuation paragraph of a list item, so it reads both the same way. Since issue #49 a
+   line of three backticks or tildes is a fence line only with at most three blanks and no tab in front; indented
+   further it is one more line of the indented block and does not end it (a fenced block inside a list item that is
+   indented that far is read as an indented block, which can only report more). Accepted: a push of a branch
    (`git push -u origin feat/x`, also `maintenance` or `feat/main-menu`), a switch to `main` that is followed by a
    pull and no push (step 3 of "Update Workflow"), and prose without the command. The check reads the command, not
    the sentence around it: a quoted push to `main` is rejected even after a "never", so describe the rule in words

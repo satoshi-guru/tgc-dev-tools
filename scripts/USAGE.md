@@ -21,7 +21,7 @@ Exit:    0 no retired phrase · 1 at least one · 2 usage / nothing could be rea
 ```
 gate.sh — offline gate for tgc-dev-tools (fleet board gate, routing["gates"]).
 Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-         scripts/gate.sh --selftest # proves the checks fail on 24 broken fixtures and pass on 10 good ones (+ 29 line cases and 163 block cases for check 7,
+         scripts/gate.sh --selftest # proves the checks fail on 24 broken fixtures and pass on 10 good ones (+ 29 line cases and 182 block cases for check 7,
          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or skil
          + 8 starts of the gate file with --push-main and 1 with --help - issue #25)
