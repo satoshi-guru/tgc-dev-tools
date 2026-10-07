@@ -22,8 +22,9 @@ ends without `report` counts as failed and is dispatched again. A tool call last
 seconds).
 
 **Why it matters:** these files are copied into `hl_claw_bot` and `hl_game_backend`; they steer other sessions, so a
-wrong instruction here is repeated everywhere. Skills here have drifted from the copies in `~/.claude/skills/` - when an
-item concerns a skill, compare both and say which is canonical in the PR; never overwrite the global copy.
+wrong instruction here is repeated everywhere. Four skills here also exist in `~/.claude/skills/` (README, section
+"Skills that also exist in `~/.claude/skills`", says which copy is canonical) - when an item concerns a skill, run
+`scripts/skill-drift.sh`, compare both and say which is canonical in the PR; never overwrite the global copy.
 
 **Boundaries:**
 - Touch only your item. Never delete files (comment out or mark superseded). Edits via the Edit tool, no `sed`.
