@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # gate.sh — offline gate for tgc-dev-tools (fleet board gate, routing["gates"]).
+# Usage: scripts/gate.sh [--selftest | --push-main [FILE ...] | --fences [FILE ...] | --help]
+#        (each form is described under "Usage:" below the list of checks. This short line stands here since issue
+#        #66: the store's script-intake.py looks for the word in the first 40 lines of a script, and the list of
+#        checks had pushed the long form to line 42)
 #
 # What it checks (no internet, no dependencies beyond bash/python3 + the store's agent-file-check):
 #   0. the root is a checkout of this repo: it has install.sh and README.md (issue #29). A root without them is
