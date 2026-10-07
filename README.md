@@ -380,8 +380,15 @@ what the fleet board runs before a PR is merged. Run it before every commit that
 
 ```bash
 scripts/gate.sh             # last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-scripts/gate.sh --selftest  # proves the checks reject broken fixtures and accept good ones
+scripts/gate.sh --selftest  # proves the checks reject broken fixtures and accept good ones; last line "selftest ok" (exit 0) or "selftest FAILED fail_lines=N" (exit 1)
 ```
+
+The selftest has a fixed last line for both results since issue #67, like the gate itself. Before, a red run ended
+with the output of its last failed case, and `scripts/gate.sh --selftest | tail -1` showed a line of that case
+(for a block case of check 7 a line of its fixture, `    | git push`). `N` counts the lines above that start with
+`selftest FAIL:` — one failed case prints one of them, an installer case up to three. The line is also there when
+the cases stop before their end, and a `selftest FAIL:` line never stands above `selftest ok`. Measured with
+`scripts/selftest-last-line-probe.sh` (below).
 
 The gate checks the repo its own file belongs to, wherever it is started from and also when it is started through
 a symlink to `scripts/gate.sh` or to `scripts/` (issue #29 — before, a link made it check the directory above the
@@ -543,7 +550,10 @@ scripts/selftest-last-line-probe.sh --selftest             # 9 cases on temp fix
 
 It is not a gate check: it runs a program's whole selftest twice (about 20 seconds for `scripts/gate.sh`). Exit 3
 means that no run was red — the program does not need the command that was stood in for, and nothing is known
-about its red run.
+about its red run. Measured on `scripts/gate.sh` on 2026-10-07 (mawk 1.3.4, `awk` stood in for): before issue #67
+the red run ended with exit 1, 212 `selftest FAIL:` lines and the line of its last failed case
+(`selftest-last-line: NOT FIXED not_fixed=1 runs=2 red=1`, exit 1); since then with
+`selftest FAILED fail_lines=212` (`selftest-last-line: ok runs=2 red=1`, exit 0).
 
 `scripts/skill-drift.sh` is deliberately **not** a gate check (it reads `~/.claude/skills`, which differs per
 machine and changes without a commit here); see "Skills that also exist in `~/.claude/skills`".
