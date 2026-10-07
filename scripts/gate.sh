@@ -60,11 +60,13 @@
 #      behind it, so a push instruction in a file behind it was installed and not read. A skill's own evals (not
 #      installed) stays out; a symlink to a file stays allowed and is read
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 28 broken fixtures and pass on 12 good ones (+ 29 line cases and 316 block cases for check 7,
+#          scripts/gate.sh --selftest # last line "selftest ok" (exit 0) or "selftest FAILED fail_lines=N" (exit 1) - issue #67, N = the lines above it that start with "selftest FAIL:";
+#          it proves the checks fail on 28 broken fixtures and pass on 12 good ones (+ 29 line cases and 316 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or
 #          skills/ - issue #45, and 3 with one or all of them empty - issue #53, + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
-#          + 9 starts of the gate file with --fences - issue #66, 2 of them since issue #69)
+#          + 9 starts of the gate file with --fences - issue #66, 2 of them since issue #69,
+#          + 7 runs of the step that prints the selftest's last line, each over a stand-in for the cases - issue #67)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 #          scripts/gate.sh --push-main [FILE ...]  # check 7 alone, as a readout (issue #25): one "FILE:LINE: command" line
 #          per reported command, then the last line "push-main: ok files=N" (exit 0) or "push-main: FOUND hits=K files=N"
@@ -1140,6 +1142,49 @@ tool_file_case() {
   return 0
 }
 
+# selftest_run CASES — runs the function CASES (the cases of the selftest), passes its output through as it comes
+# and then prints the last line of the selftest (issue #67): "selftest ok" and returns 0 when CASES ended with 0 and
+# printed no line that starts with "selftest FAIL:"; otherwise "selftest FAILED fail_lines=N" and returns 1, N being
+# the number of those lines. Before, the cases printed "selftest ok" themselves and nothing in its place on a red
+# run, so the last line of a red run was a line of the last failed case (for a block case a line of its fixture).
+# The line is printed here and not at the end of the cases, because CASES runs as one end of a pipe: it is there as
+# well when the cases stop before their end (an unset variable under set -u), and a "selftest FAIL:" line of a case
+# that did not set its return code no longer stands above "selftest ok". The count is read from the output, so a
+# case is written as before: print "selftest FAIL: ..." and set rc=1.
+selftest_run() {
+  local log code n
+  log="$(mktemp)"
+  "$1" | tee "$log"
+  code="${PIPESTATUS[0]}"
+  n="$(grep -c '^selftest FAIL:' "$log" 2>/dev/null)"
+  n="${n:-0}"
+  rm -f "$log"
+  if [ "$code" -eq 0 ] && [ "$n" -eq 0 ]; then
+    echo "selftest ok"
+    return 0
+  fi
+  echo "selftest FAILED fail_lines=$n"
+  return 1
+}
+
+# last_line_case WHAT CASES WANT_EXIT LINE... — selftest helper (issue #67): selftest_run over the function CASES
+# must end with WANT_EXIT and print exactly the LINEs on stdout. Prints both and returns 1 when it does not hold.
+last_line_case() {
+  local what="$1" cases="$2" wantcode="$3" out code want
+  shift 3
+  out="$(selftest_run "$cases" 2>/dev/null)"
+  code=$?
+  want="$(printf '%s\n' "$@")"
+  if [ "$code" -ne "$wantcode" ] || [ "$out" != "$want" ]; then
+    echo "selftest FAIL: last line of the selftest, $what: want exit $wantcode and"
+    printf '%s\n' "$want" | sed 's/^/    | /'
+    echo "  got exit $code and"
+    printf '%s\n' "$out" | sed 's/^/    | /'
+    return 1
+  fi
+  return 0
+}
+
 selftest() {
   local t rc=0
   t="$(mktemp -d)"
@@ -2199,12 +2244,46 @@ FAIL: skills/x/shared -> ../../shared: $why51" '#51' || rc=1
     $'./agents\n./agents/a.md\n./commands\n./skills\n./skills/x\n./skills/x/SKILL.md' || rc=1
   install_empty_case "installer in a source with an empty skills/" "$t/cwd" "$t/emptysrc/skills" "$t/emptydest/skills/.claude" \
     $'./agents\n./agents/a.md\n./commands\n./commands/c.md\n./commands/c2.md\n./skills' || rc=1
+  # last line cases (issue #67): selftest_run - the step that runs the cases and prints the last line of the
+  # selftest - over seven stand-ins for the cases. Each stand-in is a function that prints what a run of cases
+  # prints and ends the way it ends; the output is passed through unchanged and one line follows it.
+  #   ll_green:  a note, return 0                                      -> "selftest ok", exit 0
+  #   ll_block:  the measured case of the issue - one failed block case, whose last line is a line of its fixture,
+  #              return 1                                              -> "selftest FAILED fail_lines=1", exit 1
+  #   ll_nine:   nine failed cases, return 1                           -> "selftest FAILED fail_lines=9", exit 1
+  #   ll_norc:   a "selftest FAIL:" line, but return 0 (a case that did not set rc) -> FAILED fail_lines=1, exit 1
+  #   ll_quiet:  return 1 and no line at all                           -> "selftest FAILED fail_lines=0", exit 1
+  #   ll_abort:  the cases stop at an unset variable (set -u) after their first line -> FAILED fail_lines=0, exit 1
+  #   ll_quoted: the words inside a line, not at its start, return 0   -> not counted: "selftest ok", exit 0
+  # 7 runs: 2 green, 5 red.
+  ll_green() { echo "note: check 3 cases skipped"; return 0; }
+  ll_block() { echo "selftest FAIL: check 7 block case, reported line(s) want '2' got '':"; printf '    | %s\n' 'git switch main' 'git push'; return 1; }
+  ll_nine() { local i; for i in 1 2 3 4 5 6 7 8 9; do echo "selftest FAIL: case $i"; done; return 1; }
+  ll_norc() { echo "selftest FAIL: a case that did not set rc"; return 0; }
+  ll_quiet() { return 1; }
+  # shellcheck disable=SC2154  # ll_never_set is unset on purpose: the stand-in has to stop there
+  ll_abort() { echo "before the unset variable"; : "$ll_never_set"; echo "behind the unset variable"; return 0; }
+  ll_quoted() { echo "    | selftest FAIL: a line of a fixture"; echo "note: no selftest FAIL: line here"; return 0; }
+  last_line_case "green run" ll_green 0 "note: check 3 cases skipped" "selftest ok" || rc=1
+  last_line_case "one failed block case (the measured case)" ll_block 1 \
+    "selftest FAIL: check 7 block case, reported line(s) want '2' got '':" "    | git switch main" "    | git push" \
+    "selftest FAILED fail_lines=1" || rc=1
+  last_line_case "nine failed cases" ll_nine 1 \
+    "selftest FAIL: case 1" "selftest FAIL: case 2" "selftest FAIL: case 3" "selftest FAIL: case 4" "selftest FAIL: case 5" \
+    "selftest FAIL: case 6" "selftest FAIL: case 7" "selftest FAIL: case 8" "selftest FAIL: case 9" \
+    "selftest FAILED fail_lines=9" || rc=1
+  last_line_case "a FAIL line and return code 0" ll_norc 1 "selftest FAIL: a case that did not set rc" "selftest FAILED fail_lines=1" || rc=1
+  last_line_case "return code 1 and no line" ll_quiet 1 "selftest FAILED fail_lines=0" || rc=1
+  last_line_case "cases that stop at an unset variable" ll_abort 1 "before the unset variable" "selftest FAILED fail_lines=0" || rc=1
+  last_line_case "the words inside a line" ll_quoted 0 "    | selftest FAIL: a line of a fixture" "note: no selftest FAIL: line here" "selftest ok" || rc=1
   rm -rf "$t"
-  [ "$rc" -eq 0 ] && echo "selftest ok"
+  # Superseded by issue #67 (selftest_run prints the last line, for both results): [ "$rc" -eq 0 ] && echo "selftest ok"
   return "$rc"
 }
 
-if [ "${1:-}" = "--selftest" ]; then selftest; exit $?; fi
+# issue #67: the cases run inside selftest_run, which prints the last line - "selftest ok" or "selftest FAILED ..."
+# Superseded form: if [ "${1:-}" = "--selftest" ]; then selftest; exit $?; fi
+if [ "${1:-}" = "--selftest" ]; then selftest_run selftest; exit $?; fi
 # issue #25: the header of this file as the usage text, and check 7 alone as a readout
 case "${1:-}" in
   -h|--help) awk 'NR>1 && /^#/{sub(/^# ?/, ""); print; next} NR>1{exit}' "$SELF"; exit 0 ;;
