@@ -63,8 +63,8 @@
 #          scripts/gate.sh --selftest # last line "selftest ok" (exit 0) or "selftest FAILED fail_lines=N" (exit 1) - issue #67, N = the lines above it that start with "selftest FAIL:";
 #          it proves the checks fail on 28 broken fixtures and pass on 12 good ones (+ 29 line cases and 316 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
-#          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or skills/ - issue #45,
-#          + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
+#          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or
+#          skills/ - issue #45, and 3 with one or all of them empty - issue #53, + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
 #          + 9 starts of the gate file with --fences - issue #66, 2 of them since issue #69,
 #          + 7 runs of the step that prints the selftest's last line, each over a stand-in for the cases - issue #67)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
@@ -1053,6 +1053,35 @@ install_nosource_case() {
     bad=1
   fi
   return "$bad"
+}
+
+# install_empty_case WHAT DIR SRC DEST WANT — selftest helper (issue #53): starts the installer file
+# SRC/install.sh with bash in the directory DIR, with the destination DEST, which does not exist. SRC has agents/,
+# commands/ and skills/ beside the installer, and at least one of the three holds nothing to install. An empty
+# folder means "nothing of that kind to install" (the decision of issue #53), so wanted is: exit 0, no line of cp
+# in the output (stdout and stderr together), no entry named "*" anywhere below DEST, and below DEST exactly the
+# entries WANT (one "./path" per line, sorted by byte value, folders included) - what the source had is installed
+# and nothing else is there. Before issue #53 the unmatched pattern of a loop stayed as typed: cp stopped the
+# install half way (exit 1), or - with an empty skills/ - it ended with exit 0 and a skill directory named "*".
+# Prints one "selftest FAIL" line with what differs below it and returns 1 when it does not hold.
+install_empty_case() {
+  local out code got star why=""
+  out="$(cd "$2" && bash "$3/install.sh" "$4" 2>&1)"
+  code=$?
+  [ "$code" -eq 0 ] || why="$why"$'\n'"    exit $code, want 0"
+  if printf '%s\n' "$out" | grep -q '^cp: '; then
+    why="$why"$'\n'"    cp reported an error: $(printf '%s\n' "$out" | grep -m1 '^cp: ')"
+  fi
+  star="$(find "$4" -name '\*' 2>/dev/null | LC_ALL=C sort)"
+  [ -z "$star" ] || why="$why"$'\n'"    an entry named * in the destination: $star"
+  got="$(cd "$4" 2>/dev/null && find . -mindepth 1 | LC_ALL=C sort)"
+  if [ "$got" != "$5" ]; then
+    why="$why"$'\n'"    the destination holds other entries than wanted; want:"$'\n'"$(printf '%s\n' "$5" | sed 's/^/      | /')"
+    why="$why"$'\n'"    got:"$'\n'"$(printf '%s\n' "$got" | sed 's/^/      | /')"
+  fi
+  [ -z "$why" ] && return 0
+  echo "selftest FAIL: $1:$why"
+  return 1
 }
 
 # push_main_case WHAT DIR GATE WANT_EXIT WANT_OUT [ARG...] — selftest helper (issue #25): starts the gate file GATE
@@ -2186,6 +2215,35 @@ FAIL: skills/x/shared -> ../../shared: $why51" '#51' || rc=1
     done
     install_nosource_case "installer in a source without $miss/" "$t/cwd" "$t/nosrc/$miss" "$t/nosrcdest/$miss/.claude" "$miss/" || rc=1
   done
+  # installer empty-folder cases (issue #53): install.sh of this repo in a source that has agents/, commands/ and
+  # skills/, where at least one of the three holds nothing to install - the three sources of the table in the issue.
+  # Started with bash in an empty directory, each time with a destination below the temp dir that does not exist.
+  # An empty folder means "nothing of that kind to install": every start ends with exit 0, without a line of cp in
+  # its output, with what the source had installed and with no entry named "*" in the destination.
+  #   emptysrc/all:      nothing in any of the three folders (before: exit 1 on a cp error)
+  #   emptysrc/commands: agent a.md and skill x, commands/ empty (before: a.md installed, then exit 1 on a cp
+  #                      error, skill x not installed - half an install)
+  #   emptysrc/skills:   agent a.md and the commands c.md and c2.md, skills/ empty (before: exit 0, "Done", and a
+  #                      skill directory named "*" in the destination)
+  # 3 starts: 1 with all three folders empty, 1 with only commands/ empty, 1 with only skills/ empty.
+  local e
+  for e in all commands skills; do
+    mkdir -p "$t/emptysrc/$e/agents" "$t/emptysrc/$e/commands" "$t/emptysrc/$e/skills"
+    cp "$srcinst" "$t/emptysrc/$e/install.sh"
+  done
+  for e in commands skills; do
+    printf -- '---\nname: a\ndescription: d\n---\nbody\n' > "$t/emptysrc/$e/agents/a.md"
+  done
+  mkdir -p "$t/emptysrc/commands/skills/x"
+  printf -- '---\nname: x\ndescription: d\n---\nbody\n' > "$t/emptysrc/commands/skills/x/SKILL.md"
+  printf 'cmd\n' > "$t/emptysrc/skills/commands/c.md"
+  printf 'cmd 2\n' > "$t/emptysrc/skills/commands/c2.md"
+  install_empty_case "installer in a source whose agents/, commands/ and skills/ are all empty" "$t/cwd" "$t/emptysrc/all" "$t/emptydest/all/.claude" \
+    $'./agents\n./commands\n./skills' || rc=1
+  install_empty_case "installer in a source with an empty commands/" "$t/cwd" "$t/emptysrc/commands" "$t/emptydest/commands/.claude" \
+    $'./agents\n./agents/a.md\n./commands\n./skills\n./skills/x\n./skills/x/SKILL.md' || rc=1
+  install_empty_case "installer in a source with an empty skills/" "$t/cwd" "$t/emptysrc/skills" "$t/emptydest/skills/.claude" \
+    $'./agents\n./agents/a.md\n./commands\n./commands/c.md\n./commands/c2.md\n./skills' || rc=1
   # last line cases (issue #67): selftest_run - the step that runs the cases and prints the last line of the
   # selftest - over seven stand-ins for the cases. Each stand-in is a function that prints what a run of cases
   # prints and ends the way it ends; the output is passed through unchanged and one line follows it.

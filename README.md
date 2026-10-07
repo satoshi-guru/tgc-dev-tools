@@ -77,6 +77,11 @@ What the install does:
   destination is not created. Until issue #45 it had made the three folders in the destination by then, and from a
   source without `skills/` it ended with exit 0 and a skill directory named `*`. Only the three folders are looked
   at, not what is inside them.
+- A folder that is there but holds nothing to install — `agents/` or `commands/` without a `*.md`, `skills/`
+  without a directory — means "nothing of that kind to install": the rest is installed and the install ends with
+  exit 0, also when all three are empty (the destination then gets three empty folders). Until issue #53 an empty
+  `agents/` or `commands/` stopped the install with a `cp` error and exit 1, with what came before it already
+  installed, and an empty `skills/` ended with exit 0 and a skill directory named `*` in the destination.
 - `hl_claw_bot` and `hl_game_backend` both list `.claude/` in their `.gitignore`. Installed copies are therefore
   untracked there: they do not show up in `git status`, are not part of a clone, and every checkout or worktree
   of those repos needs its own install. This repo is the only versioned source — edit here, then reinstall.
