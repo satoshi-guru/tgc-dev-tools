@@ -404,7 +404,8 @@ What it checks:
 7. This README carries no `git push` command whose target is `main` (issues #16, #18) — one
    `FAIL: README.md:<line>: …` per offending command, at the line where it starts. Rejected: the pushed ref or the
    refspec target is the whole word `main` (`origin main`, `-u origin main`, `HEAD:main`, `feat/x:main`), also when
-   the command is wrapped with a backslash or carries options between `git` and `push` (`-C dir`, `-c k=v`);
+   the command is wrapped with a backslash or carries options between `git` and `push` (`-C dir`, `-c k=v`), and
+   since issue #41 when the word `push`, `switch` or `checkout` behind `git` stands in a pair of quotes;
    the options `--all`, `--mirror` and `--branches`, whatever the remote; and, inside one code block, a push
    without a ref (or of `HEAD`) after a switch or checkout to `main`. A code block is a fenced one or, since
    issue #32, an indented one: lines with four blanks or a tab in front, where an empty line between them does not
