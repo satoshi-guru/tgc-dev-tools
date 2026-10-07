@@ -30,6 +30,7 @@ tgc-dev-tools/
 │   ├── readme-listing-check.sh # Does this README list every agent, command, skill and script?
 │   ├── link-start-probe.sh     # Does a program answer the same when started through a symlink? — see "Gate"
 │   ├── branch-after-probe.sh   # Which branch does a git command leave checked out? Asks git in a throwaway clone — see "Gate"
+│   ├── selftest-last-line-probe.sh # Does a program's --selftest end with a fixed last line, green and red? — see "Gate"
 │   ├── skill-drift.sh          # Do the skills here still match ~/.claude/skills? — see "Skills that also exist…"
 │   ├── skill-drift-declared.txt # The deliberate differences skill-drift.sh accepts (one fork, one appendix)
 │   ├── board-prompt-check.sh   # Does a lane's order (board text + role files) still carry a retired sentence? — see "Gate"
@@ -379,8 +380,15 @@ what the fleet board runs before a PR is merged. Run it before every commit that
 
 ```bash
 scripts/gate.sh             # last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-scripts/gate.sh --selftest  # proves the checks reject broken fixtures and accept good ones
+scripts/gate.sh --selftest  # proves the checks reject broken fixtures and accept good ones; last line "selftest ok" (exit 0) or "selftest FAILED fail_lines=N" (exit 1)
 ```
+
+The selftest has a fixed last line for both results since issue #67, like the gate itself. Before, a red run ended
+with the output of its last failed case, and `scripts/gate.sh --selftest | tail -1` showed a line of that case
+(for a block case of check 7 a line of its fixture, `    | git push`). `N` counts the lines above that start with
+`selftest FAIL:` — one failed case prints one of them, an installer case up to three. The line is also there when
+the cases stop before their end, and a `selftest FAIL:` line never stands above `selftest ok`. Measured with
+`scripts/selftest-last-line-probe.sh` (below).
 
 The gate checks the repo its own file belongs to, wherever it is started from and also when it is started through
 a symlink to `scripts/gate.sh` or to `scripts/` (issue #29 — before, a link made it check the directory above the
@@ -525,6 +533,27 @@ One `branch=B push=P push-head=H exit=N | COMMAND` line per command, then `branc
 the gate has to give the same answer with every git version. Measured with git 2.43.0 on 2026-10-07: `--track`,
 `-t`, `--track=direct` and `--no-track` in front of `origin/main` all create and check out a local `main` (the
 last one was expected to be left alone), and so does a rename of the current branch with `branch -m` / `-M`.
+
+`scripts/selftest-last-line-probe.sh` measures whether a program's `--selftest` ends with a fixed last line for
+both results (issue #67). The board reads a program by its last line, and a red selftest that stops after the
+output of its last failed case leaves a line of that case there. The probe starts `PROGRAM --selftest` twice: as
+it is, and with a stand-in for one command (default `awk`) first in `PATH` that prints nothing and ends with
+exit 0 — the cases that need the command fail, so the second start is a red run without a change to the program.
+A run is fixed when it ends with exit 0 and a last line that starts with `selftest ok`, or with another exit code
+and a last line that starts with `selftest FAILED`. Read-only; the stand-in lives in a temp dir.
+
+```bash
+scripts/selftest-last-line-probe.sh scripts/gate.sh        # "plain: exit=N fail_lines=K last=…", "broken (awk): exit=N fail_lines=K last=…", then "selftest-last-line: ok runs=2 red=R" (exit 0), "… NOT FIXED not_fixed=K runs=2 red=R" (exit 1) or "… NOT MEASURED runs=2 red=0" (exit 3)
+scripts/selftest-last-line-probe.sh --break grep PROGRAM   # stand in for another command: awk, grep, sed, diff, sort, cmp or find
+scripts/selftest-last-line-probe.sh --selftest             # 9 cases on temp fixtures
+```
+
+It is not a gate check: it runs a program's whole selftest twice (about 20 seconds for `scripts/gate.sh`). Exit 3
+means that no run was red — the program does not need the command that was stood in for, and nothing is known
+about its red run. Measured on `scripts/gate.sh` on 2026-10-07 (mawk 1.3.4, `awk` stood in for): before issue #67
+the red run ended with exit 1, 212 `selftest FAIL:` lines and the line of its last failed case
+(`selftest-last-line: NOT FIXED not_fixed=1 runs=2 red=1`, exit 1); since then with
+`selftest FAILED fail_lines=212` (`selftest-last-line: ok runs=2 red=1`, exit 0).
 
 `scripts/skill-drift.sh` is deliberately **not** a gate check (it reads `~/.claude/skills`, which differs per
 machine and changes without a commit here); see "Skills that also exist in `~/.claude/skills`".
