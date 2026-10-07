@@ -1372,6 +1372,84 @@ EOF
   push_block 4 "$F" 'git switch main' "${F}x${F} y" 'git push' "$F" || rc=1
   # the command inside the inline code is read as before: a push to main in such a sentence is a report at its line
   push_block 1 "${F}git push origin main${F} is what this check reports." || rc=1
+  # block cases for check 7 (issue #24), two more ways to get main checked out. What git does with each command was
+  # measured with scripts/branch-after-probe.sh (git 2.43.0, 2026-10-07); its selftest holds the same forms.
+  # form 14 — a remote branch <remote>/main behind --track, -t, --track=<mode> or --no-track: git derives the name
+  # of the new local branch from the part behind the first slash, so main is checked out. 12 reported, 13 left alone.
+  # reported: the three commands of the issue, the short option at checkout too, the long option with a mode,
+  # another remote, the long name of the remote branch, and --no-track (the probe: it derives main as well)
+  push_block 3 "$F" 'git switch --track origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout --track origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git switch -t origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout -t origin/main' 'git push origin' "$F" || rc=1
+  push_block 3 "$F" 'git switch --track=direct origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git switch --track upstream/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git switch --track refs/remotes/origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git switch --no-track origin/main' 'git push -u origin HEAD' "$F" || rc=1
+  # in one line, in an indented block, and with the subcommand in quotes (form 8)
+  push_block 1 'git switch --track origin/main && git push' || rc=1
+  push_block 2 '    git checkout --track origin/main' '    git push' || rc=1
+  push_block 3 "$F" 'git "switch" --track origin/main' 'git push' "$F" || rc=1
+  # a new-branch option behind the start point names the branch: here it is main
+  push_block 3 "$F" 'git switch --track origin/main -c main' 'git push' "$F" || rc=1
+  # left alone: a new-branch option names another branch, in front of the start point or behind it
+  push_block '' "$F" 'git switch -c feature --track origin/main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch --track origin/main -c feature' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git checkout -b feat/y --track origin/main' 'git push' "$F" || rc=1
+  # no longer reported: the start point main with a new branch of another name behind it (the probe: feat/x is
+  # checked out). Before, the first word main alone decided.
+  push_block '' "$F" 'git switch main -c feat/x' 'git push' "$F" || rc=1
+  # the remote branch is not main: another name, main as the last part of a longer name, a name that starts with main
+  push_block '' "$F" 'git switch --track origin/feature' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch --track origin/topic/main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch --track origin/maintenance' 'git push' "$F" || rc=1
+  # no option that derives a name: git switch rejects the command, git checkout detaches (as before)
+  push_block '' "$F" 'git switch origin/main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git checkout origin/main' 'git push' "$F" || rc=1
+  # the state is cleared and scoped as for git switch main: another branch behind it, a push of another branch, the
+  # next code block (named under "Still not seen"), and a sentence that names the command
+  push_block '' "$F" 'git switch --track origin/main' 'git switch feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch --track origin/main' 'git push -u origin feat/x' "$F" || rc=1
+  push_block '' "$F" 'git switch --track origin/main' "$F" '' "$F" 'git push' "$F" || rc=1
+  push_block '' 'After `git switch --track origin/main` the install runs.' 'Then `git push` the branch.' || rc=1
+  # form 15 — git branch -m / -M / --move with the new name main: the current branch is called main from then on.
+  # 12 reported, 14 left alone.
+  # reported: the two commands of the issue, the long option, the form with the old name in front, a push of HEAD
+  push_block 3 "$F" 'git branch -M main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git branch -m main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git branch --move main' 'git push origin' "$F" || rc=1
+  push_block 3 "$F" 'git branch -m master main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git branch -M main' 'git push -u origin HEAD' "$F" || rc=1
+  # in one line, in an indented block, with the subcommand in quotes, with options between git and branch, and with
+  # a command between the rename and the push
+  push_block 1 'git branch -M main && git push' || rc=1
+  push_block 2 '    git branch -M main' '    git push' || rc=1
+  push_block 3 "$F" 'git "branch" -M main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git -C ../x branch -M main' 'git -C ../x push' "$F" || rc=1
+  push_block 4 "$F" 'git branch -M main' 'git remote add origin https://example.org/x.git' 'git push' "$F" || rc=1
+  # reported before too, and still: main is checked out and git branch does not change that - the rename of another
+  # branch, a new branch that is only created
+  push_block 4 "$F" 'git switch main' 'git branch -m feat/a feat/b' 'git push' "$F" || rc=1
+  push_block 4 "$F" 'git switch main' 'git branch feat/x' 'git push' "$F" || rc=1
+  # left alone: the new name is not main, or the command renames nothing (create, delete, copy, list, set upstream -
+  # a push configured elsewhere is named under "Still not seen")
+  push_block '' "$F" 'git branch -M trunk' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git branch -M maintenance' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git branch -m feat/a main-menu' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git branch main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git branch -d main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git branch -c main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git branch --list main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git branch -u origin/main' 'git push' "$F" || rc=1
+  # no longer reported: main was checked out and is renamed away (the probe: trunk is checked out, the push without a
+  # ref is refused). Before, git branch was not read and the state of the switch lived on.
+  push_block '' "$F" 'git switch main' 'git branch -m trunk' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git branch -m main trunk' 'git push' "$F" || rc=1
+  # the state is cleared and scoped as for git switch main
+  push_block '' "$F" 'git branch -M main' 'git switch feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git branch -M main' 'git push -u origin feat/x' "$F" || rc=1
+  push_block '' "$F" 'git branch -M main' "$F" '' "$F" 'git push' "$F" || rc=1
+  push_block '' 'After `git branch -M main` the remote is added.' 'Then `git push` the branch.' || rc=1
   # pushwrapped / pushonmain / pushflow: the same through run_checks, like pushmain above (block at line 20). The
   # wrapped command is named at the line where it starts (21), the push without a ref at its own line (22); the
   # step-3 block of the real README (switch to main, pull, install) stays accepted.
