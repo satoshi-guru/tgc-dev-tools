@@ -1287,6 +1287,49 @@ EOF
   # four opened one that nothing closed, so the state lived across the prose to the push in line 7. The three lines
   # behind the block are lines outside a fence, where the state lives for one line.
   push_block '' "$F4" 'text' "$F" "$F4" 'git switch main' 'Some prose.' 'git push' || rc=1
+  # block cases for check 7 (issue #69), the opening line. It belongs to form 12 (issue #66) and uses its F4.
+  # form 13 — a line that starts with a run of backticks and carries a backtick somewhere behind the run opens no
+  # fenced block (the CommonMark rule for the info string of a backtick fence, fence_run in FENCE_AWK): it is a line
+  # of a paragraph that starts with inline code. 6 reported, 11 left alone.
+  # left alone. The five lines of the issue: a heading, an empty line, the sentence that starts with inline code in
+  # three backticks, prose, a push. The sentence opened a block that nothing closed, so the state lived across the
+  # prose to the push in line 5
+  push_block '' '# Update' '' "${F}git switch main${F} is how the update starts." 'Some prose.' 'git push' || rc=1
+  # the push straight behind the sentence: outside a block the state lives for one line
+  push_block '' "${F}git switch main${F} is how the update starts." 'git push' || rc=1
+  # what the issue names as not measured: a run of four backticks with a backtick behind it; then three blanks in
+  # front, a backtick in the middle of what would be the info string, one at its very end, and carriage returns
+  push_block '' "${F4}git switch main${F4} is how." 'Some prose.' 'git push' || rc=1
+  push_block '' "   ${F}git switch main${F} is how." 'Some prose.' 'git push' || rc=1
+  push_block '' "${F}bash \`-x\`" 'git switch main' 'Some prose.' 'git push' || rc=1
+  push_block '' "${F}bash\`" 'git switch main' 'Some prose.' 'git push' || rc=1
+  push_block '' "${F}git switch main${F} is how.$R" "Some prose.$R" "git push$R" || rc=1
+  # the blocks behind such a sentence were read inverted: the real opening line closed, the real closing line opened
+  # a block that nothing closed, and the state lived from the switch in line 5 across the prose to the push in line 7
+  push_block '' "${F}make${F} builds it." "$F" 'git add .' "$F" 'git switch main' 'Some prose.' 'git push' || rc=1
+  # two such sentences are two lines of prose, not the two ends of a block
+  push_block '' "${F}a${F} one" 'git switch main' "${F}b${F} two" 'git push' || rc=1
+  # inside a block such a line was content before and still is; the block is closed by its own kind as before
+  push_block '' "$F" 'git switch main' "${F}x${F} y" "$F" 'git push' || rc=1
+  # an opening line with an info string that carries no backtick still opens a block, and a wrapped command is still
+  # not joined with it
+  push_block '' 'git switch main && \' "${F}bash" 'git push' "$F" || rc=1
+  # reported. The other side of the inverted blocks, not named in the issue: the real block behind such a sentence
+  # was read as the lines between two blocks, so the switch in line 3 did not reach the push in line 4 - a report
+  # that was missed, not one too many
+  push_block 4 "${F}make${F} builds it. Then:" "$F" 'git switch main' 'git push' "$F" || rc=1
+  # the second place of the rule, the join of a wrapped command: a line that ends in a backslash is joined with such
+  # a sentence, it is no fence line. Built for that place - before, the sentence opened a block and cleared the state.
+  push_block 2 'git switch main && \' "${F}x${F} ; git push" || rc=1
+  # reported before issue #69 too. The rule is one for backticks: a line of tildes may carry a backtick behind its
+  # run and still opens a block (in CommonMark the info string of a tilde fence may hold any character)
+  push_block 4 '~~~ a`b' 'git switch main' 'Some prose.' 'git push' || rc=1
+  # an info string without a backtick still opens a block, here one that nothing closes
+  push_block 4 "${F}bash" 'git switch main' 'Some prose.' 'git push' || rc=1
+  # inside a block such a line is content and leaves the state as it is
+  push_block 4 "$F" 'git switch main' "${F}x${F} y" 'git push' "$F" || rc=1
+  # the command inside the inline code is read as before: a push to main in such a sentence is a report at its line
+  push_block 1 "${F}git push origin main${F} is what this check reports." || rc=1
   # pushwrapped / pushonmain / pushflow: the same through run_checks, like pushmain above (block at line 20). The
   # wrapped command is named at the line where it starts (21), the push without a ref at its own line (22); the
   # step-3 block of the real README (switch to main, pull, install) stays accepted.
@@ -1523,6 +1566,21 @@ EOF
   fences_case "a directory as FILE" "$t/fx" "$SELF" 2 'gate.sh: --fences: not a readable file: sub' sub || rc=1
   fences_case "no FILE, the files check 7 reads in a repo" "$t/pm/sub" "$t/pmrepo/scripts/gate.sh" 0 \
     'fences: files=4 blocks=1 long=0 inner=0 unclosed=0' || rc=1
+  # 2 more starts with --fences (issue #69), 9 in all: a line that starts with a run of backticks and carries a
+  # backtick behind the run is no fence line - it opens nothing and is not named as an inner line either.
+  #   fx/inline.md, 5 lines: the fixture of the issue - a heading, an empty line, a sentence that starts with inline
+  #                code in three backticks, prose, a push. No block (before: one that nothing closed, at line 3)
+  #   fx/mixed.md, 8 lines: such a sentence (1), a plain block with a line inside that starts with three backticks
+  #                and carries one more (2-4), a block of tildes whose info string carries a backtick (5-6), a line of
+  #                four backticks with one behind them (7) and a block with an info string that nothing closes (8).
+  #                Three blocks, one unclosed (before: four, read inverted from line 1 on - line 7 long and unclosed,
+  #                line 8 an inner line)
+  printf '%s\n' '# Update' '' "${F}git switch main${F} is how the update starts." 'Some prose.' 'git push' > "$t/fx/inline.md"
+  printf '%s\n' "${F}x${F} text" "$F" "${F}a\`b" "$F" '~~~ a`b' '~~~' "${F4} a \` b" "${F}bash" > "$t/fx/mixed.md"
+  fences_case "a sentence that starts with inline code in three backticks" "$t/fx" "$SELF" 0 \
+    'fences: files=1 blocks=0 long=0 inner=0 unclosed=0' inline.md || rc=1
+  fences_case "8 lines, backtick runs with a backtick behind them outside and inside a block" "$t/fx" "$SELF" 0 \
+    "mixed.md:8: unclosed: ${F}bash"$'\n'"fences: files=1 blocks=3 long=0 inner=0 unclosed=1" mixed.md || rc=1
   printf '%s\n' "$helpout" | grep -q -F -- 'scripts/gate.sh --fences [FILE ...]' || { echo "selftest FAIL: --help does not name --fences [FILE ...]"; rc=1; }
   # link cases (issue #29): the gate file itself, started with bash in an empty directory, directly and through
   # symlinks - the last line and the exit code are those of the repo the file belongs to, never of the directory
