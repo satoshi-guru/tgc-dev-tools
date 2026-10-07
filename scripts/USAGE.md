@@ -24,13 +24,13 @@ Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; 
          scripts/gate.sh --selftest # proves the checks fail on 24 broken fixtures and pass on 10 good ones (+ 29 line cases and 182 block cases for check 7,
          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or skil
-         + 8 starts of the gate file with --push-main and 1 with --help - issue #25)
+         + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
+         + 7 starts of the gate file with --fences - issue #66)
          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
          scripts/gate.sh --push-main [FILE ...]  # check 7 alone, as a readout (issue #25): one "FILE:LINE: command" line
          per reported command, then the last line "push-main: ok files=N" (exit 0) or "push-main: FOUND hits=K files=N"
          (exit 1); exit 2 and nothing read when a FILE is no readable file. Without FILE: the files check 7 reads in
          this repo, README.md and what install.sh installs
-         scripts/gate.sh --help     # this header
 ```
 
 ## `install-status.sh`

@@ -40,12 +40,18 @@
 #          scripts/gate.sh --selftest # proves the checks fail on 24 broken fixtures and pass on 10 good ones (+ 29 line cases and 182 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or skills/ - issue #45,
-#          + 8 starts of the gate file with --push-main and 1 with --help - issue #25)
+#          + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
+#          + 7 starts of the gate file with --fences - issue #66)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 #          scripts/gate.sh --push-main [FILE ...]  # check 7 alone, as a readout (issue #25): one "FILE:LINE: command" line
 #          per reported command, then the last line "push-main: ok files=N" (exit 0) or "push-main: FOUND hits=K files=N"
 #          (exit 1); exit 2 and nothing read when a FILE is no readable file. Without FILE: the files check 7 reads in
 #          this repo, README.md and what install.sh installs
+#          scripts/gate.sh --fences [FILE ...]  # the code fences as check 7 reads them, as a readout (issue #66): one
+#          "FILE:LINE: kind: text" line per fence that opens with four or more characters (long), per line inside a
+#          fenced block that starts like a fence line and does not close it (inner) and per block nothing closes
+#          (unclosed), then the last line "fences: files=N blocks=B long=L inner=I unclosed=U" (exit 0, whatever the
+#          counts); exit 2 and nothing read when a FILE is no readable file. Without FILE: the same files as --push-main
 #          scripts/gate.sh --help     # this header
 set -uo pipefail
 
@@ -89,6 +95,45 @@ frontmatter_ok() {
   done
   return 0
 }
+
+# FENCE_AWK — the fence rule as awk functions (issue #66), one place for the programs that read code fences:
+# fence_readout (the option --fences) and readme_push_main (check 7). It is the CommonMark rule:
+#   - a fence line starts, behind at most three blanks and no tab (issue #49), with a run of three or more backticks
+#     or of three or more tildes
+#   - outside a fenced block every such line opens one; the character and the length of its run are kept
+#   - inside a fenced block only a line of the same character, with a run at least as long as the opening one and
+#     nothing but blanks or tabs behind it, closes the block. Every other line there is content: a line of the other
+#     character, a shorter run, and a run with text behind it (what would be an info string on an opening line)
+#   - a block that nothing closes runs to the end of the file
+# fence_run(s) returns the length of the run at the start of s (0 = s is no fence line) and sets FCH to the
+# character of the run, FLEN to its length and FREST to what stands behind it. fence_change(s) says whether s
+# changes the state held in the globals fence / fch / flen: it opens a block (fence is 0) or closes the open one.
+# The caller changes the state: opening is fence = 1; fch = FCH; flen = FLEN, closing is fence = 0.
+# Not part of the rule here: an opening line of backticks whose info string carries a backtick is inline code in
+# CommonMark and opens nothing there; here it opens a block, as every such line did before issue #66.
+FENCE_AWK='
+    # The blanks in front are counted by hand. The first form of this function (same branch) dropped them with
+    # sub(/^ ? ? ?/, "", s); run with mawk 1.3.4, a fence line with one to three blanks in front was then no fence
+    # line (measured on this repo: 57 blocks read where 62 stand, 5 indented ones in 3 files missed). Why that sub
+    # did not drop the blanks was not looked into; the loop needs no pattern. Superseded, kept as a comment:
+    #   sub(/^ ? ? ?/, "", s); c = substr(s, 1, 1) ... FREST = substr(s, m + 1)
+    function fence_run(s,   b, c, m) {
+      b = 0
+      while (b < 3 && substr(s, b + 1, 1) == " ") b++
+      c = substr(s, b + 1, 1)
+      if (c != "`" && c != "~") return 0
+      m = 1
+      while (substr(s, b + m + 1, 1) == c) m++
+      if (m < 3) return 0
+      FCH = c; FLEN = m; FREST = substr(s, b + m + 1)
+      return m
+    }
+    function fence_change(s,   m) {
+      m = fence_run(s)
+      if (!fence) return (m > 0)
+      return (m >= flen && FCH == fch && FREST ~ /^[ \t]*$/)
+    }
+'
 
 # readme_push_main FILE — prints "LINE: text" for every line that carries a `git push` command whose pushed ref or
 # refspec target is the whole word main: origin main, -u origin main, HEAD:main, feat/x:main, +main, refs/heads/main,
@@ -379,6 +424,81 @@ push_main_readout() {
   return 1
 }
 
+# fence_lines FILE — prints what the fence rule of FENCE_AWK finds in FILE that is more than a plain fenced block,
+# one "LINE: kind: text" line each, in the order of the lines, then one last line "= BLOCKS LONG INNER UNCLOSED":
+#   long     - the line opens a fenced block with a run of four or more characters
+#   inner    - the line stands inside a fenced block, starts like a fence line and does not close it: the other
+#              character, a shorter run, or text behind the run. A reader that toggles at every fence line (check 7
+#              before issue #66) ends the block here; where a file has no such line, both readers see the same blocks
+#   unclosed - the line opens a fenced block that nothing closes before the end of the file ("long, unclosed" when
+#              it is both)
+# Carriage returns at the end of a line are dropped first, as readme_push_main does.
+fence_lines() {
+  awk "$FENCE_AWK"'
+    { s = $0; sub(/\r+$/, "", s)
+      m = fence_run(s)
+      if (!fence) {
+        if (m) {
+          fence = 1; fch = FCH; flen = FLEN; open = NR; blocks++
+          if (m >= 4) { long++; kind[NR] = "long"; text[NR] = s }
+          else text[NR] = s
+        }
+      } else if (m) {
+        if (fence_change(s)) fence = 0
+        else { inner++; kind[NR] = "inner"; text[NR] = s }
+      }
+    }
+    END {
+      if (fence) { unclosed++; kind[open] = (kind[open] != "") ? kind[open] ", unclosed" : "unclosed" }
+      for (i = 1; i <= NR; i++) if (kind[i] != "") print i ": " kind[i] ": " text[i]
+      print "= " (blocks + 0) " " (long + 0) " " (inner + 0) " " (unclosed + 0)
+    }
+  ' "$1"
+}
+
+# fence_readout [FILE...] — the option --fences (issue #66): the code fences of every FILE as the fence rule reads
+# them, as a readout. Prints one "FILE:LINE: kind: text" line per line fence_lines names (FILE as it was given), then
+# the last line "fences: files=N blocks=B long=L inner=I unclosed=U". Returns 0 when every FILE was read, whatever
+# the counts - it is a count, not a verdict - and 2 when a FILE is no readable file; then nothing is read.
+# Without a FILE it reads what check 7 reads in the repo this file belongs to: README.md and the files of
+# tool_files, named by their path below the repo root. Nothing to read there is exit 2 as well.
+# What it is for: before the fence rule changes, inner=0 over the files check 7 reads shows that the change moves
+# no block there (the measurement issue #66 asks for first).
+fence_readout() {
+  local f out root="" strip="" files=0 blocks=0 long=0 inner=0 unclosed=0 b l i u
+  local -a paths=()
+  if [ "$#" -eq 0 ]; then
+    root="$(cd -P "$(dirname "$SELF")/.." && pwd)" || { echo "gate.sh: --fences: cannot resolve the repo root" >&2; return 2; }
+    strip="$root/"
+    [ -f "$root/README.md" ] && paths+=("$root/README.md")
+    while IFS= read -r -d '' f; do paths+=("$f"); done < <(tool_files "$root")
+    [ "${#paths[@]}" -gt 0 ] || { echo "gate.sh: --fences: no README.md and no installed file in $root" >&2; return 2; }
+  else
+    paths=("$@")
+  fi
+  for f in "${paths[@]}"; do
+    if [ ! -f "$f" ] || [ ! -r "$f" ]; then
+      echo "gate.sh: --fences: not a readable file: ${f#"$strip"}" >&2
+      return 2
+    fi
+  done
+  for f in "${paths[@]}"; do
+    files=$((files + 1))
+    while IFS= read -r out; do
+      case "$out" in
+        "= "*)
+          read -r b l i u <<< "${out#= }"
+          blocks=$((blocks + b)); long=$((long + l)); inner=$((inner + i)); unclosed=$((unclosed + u))
+          ;;
+        "") ;;
+        *) printf '%s:%s\n' "${f#"$strip"}" "$out" ;;
+      esac
+    done < <(fence_lines "$f")
+  done
+  echo "fences: files=$files blocks=$blocks long=$long inner=$inner unclosed=$unclosed"
+  return 0
+}
+
 run_checks() {
   local root="$1" f
   FAILS=0
@@ -622,6 +742,24 @@ push_main_case() {
   code=$?
   if [ "$code" -ne "$wantcode" ] || [ "$out" != "$want" ]; then
     echo "selftest FAIL: --push-main, $what: want exit $wantcode and"
+    printf '%s\n' "$want" | sed 's/^/    | /'
+    echo "  got exit $code and"
+    printf '%s\n' "$out" | sed 's/^/    | /'
+    return 1
+  fi
+  return 0
+}
+
+# fences_case WHAT DIR GATE WANT_EXIT WANT_OUT [ARG...] — selftest helper (issue #66): starts the gate file GATE
+# with bash in the directory DIR as "GATE --fences ARG...". The exit code must be WANT_EXIT and the whole output
+# (stdout and stderr together) must be WANT_OUT, line for line. Prints both and returns 1 when it does not hold.
+fences_case() {
+  local what="$1" dir="$2" gate="$3" wantcode="$4" want="$5" out code
+  shift 5
+  out="$(cd "$dir" && bash "$gate" --fences "$@" 2>&1)"
+  code=$?
+  if [ "$code" -ne "$wantcode" ] || [ "$out" != "$want" ]; then
+    echo "selftest FAIL: --fences, $what: want exit $wantcode and"
     printf '%s\n' "$want" | sed 's/^/    | /'
     echo "  got exit $code and"
     printf '%s\n' "$out" | sed 's/^/    | /'
@@ -1243,6 +1381,44 @@ EOF
   [ "${helpout%%$'\n'*}" = "gate.sh — offline gate for tgc-dev-tools (fleet board gate, routing[\"gates\"])." ] || {
     echo "selftest FAIL: --help does not start with the first line of the header, but with: ${helpout%%$'\n'*}"; rc=1; }
   printf '%s\n' "$helpout" | grep -q -F -- 'scripts/gate.sh --push-main [FILE ...]' || { echo "selftest FAIL: --help does not name --push-main [FILE ...]"; rc=1; }
+  # option cases (issue #66): the gate file itself, started with --fences - the code fences as the fence rule of
+  # FENCE_AWK reads them, as a readout. One "FILE:LINE: kind: text" line per named line, then a last line with the
+  # counts; exit 0 when every FILE was read, 2 for a FILE that is no readable file (nothing is read then). The whole
+  # output is compared, line for line. F is the fence of three backticks, F4 one of four.
+  #   fx/all.md, 13 lines: a block of four backticks with a line of three inside (1-3), a block of three backticks
+  #                with a line of tildes and a line with text behind the run inside (4-7), a line of three backticks
+  #                behind four blanks, which is no fence line (8), a block of four tildes with an info string, a line
+  #                of three inside and closed by five (9-11), and a block that nothing closes (12-13)
+  #   fx/crlf.md:  a block of four backticks whose lines end in a carriage return, with a line of three inside
+  #   fx/last.md:  a block of four backticks that nothing closes - one line that is long and unclosed
+  #   fx/indent.md, 9 lines: fence lines with blanks in front - a block opened behind three blanks and closed behind
+  #                one (1-3), a block of four tildes opened behind two blanks, with a line of three behind three
+  #                blanks inside, closed behind none (4-7), and a block opened behind one blank whose only other fence
+  #                line has four blanks in front, so it is content and the block is unclosed (8-9). The first form of
+  #                fence_run read none of these lines as a fence line
+  #   pm/clean.md: one plain block (the fixture of --push-main above); pmrepo: the README of the fixtures has one
+  # 7 starts with --fences: 4 with files that can be read (the 13 lines, a plain block, three files in one start,
+  # the indented fence lines), 2 with a FILE that is none (missing next to one that can be read, a directory),
+  # 1 without a FILE (pmrepo).
+  local F4='````'
+  mkdir -p "$t/fx/sub"
+  printf '%s\n' "$F4" "$F" "$F4" "$F" '~~~' "${F}bash" "$F" "    $F" '~~~~ info' '~~~' '~~~~~' "$F" 'text' > "$t/fx/all.md"
+  printf '%s\r\n' "$F4" 'git switch main' "$F" 'git push' "$F4" > "$t/fx/crlf.md"
+  printf '%s\n' 'text' "$F4" 'git push' > "$t/fx/last.md"
+  fences_case "13 lines with every kind" "$t/fx" "$SELF" 0 \
+    "all.md:1: long: $F4"$'\n'"all.md:2: inner: $F"$'\n'"all.md:5: inner: ~~~"$'\n'"all.md:6: inner: ${F}bash"$'\n'"all.md:9: long: ~~~~ info"$'\n'"all.md:10: inner: ~~~"$'\n'"all.md:12: unclosed: $F"$'\n'"fences: files=1 blocks=4 long=2 inner=4 unclosed=1" all.md || rc=1
+  fences_case "one plain block" "$t/pm" "$SELF" 0 'fences: files=1 blocks=1 long=0 inner=0 unclosed=0' clean.md || rc=1
+  fences_case "three files in one start, one with carriage returns" "$t" "$SELF" 0 \
+    "fx/crlf.md:1: long: $F4"$'\n'"fx/crlf.md:3: inner: $F"$'\n'"fx/last.md:2: long, unclosed: $F4"$'\n'"fences: files=3 blocks=3 long=2 inner=1 unclosed=1" fx/crlf.md pm/clean.md fx/last.md || rc=1
+  printf '%s\n' "   $F" 'text' " $F" '  ~~~~' '   ~~~' 'text' '~~~~' " $F" "    $F" > "$t/fx/indent.md"
+  fences_case "fence lines with one to three blanks in front" "$t/fx" "$SELF" 0 \
+    "indent.md:4: long:   ~~~~"$'\n'"indent.md:5: inner:    ~~~"$'\n'"indent.md:8: unclosed:  $F"$'\n'"fences: files=1 blocks=3 long=1 inner=1 unclosed=1" indent.md || rc=1
+  fences_case "a FILE that does not exist next to one that can be read" "$t/fx" "$SELF" 2 \
+    'gate.sh: --fences: not a readable file: nope.md' all.md nope.md || rc=1
+  fences_case "a directory as FILE" "$t/fx" "$SELF" 2 'gate.sh: --fences: not a readable file: sub' sub || rc=1
+  fences_case "no FILE, the files check 7 reads in a repo" "$t/pm/sub" "$t/pmrepo/scripts/gate.sh" 0 \
+    'fences: files=4 blocks=1 long=0 inner=0 unclosed=0' || rc=1
+  printf '%s\n' "$helpout" | grep -q -F -- 'scripts/gate.sh --fences [FILE ...]' || { echo "selftest FAIL: --help does not name --fences [FILE ...]"; rc=1; }
   # link cases (issue #29): the gate file itself, started with bash in an empty directory, directly and through
   # symlinks - the last line and the exit code are those of the repo the file belongs to, never of the directory
   # above the link.
@@ -1342,6 +1518,8 @@ if [ "${1:-}" = "--selftest" ]; then selftest; exit $?; fi
 case "${1:-}" in
   -h|--help) awk 'NR>1 && /^#/{sub(/^# ?/, ""); print; next} NR>1{exit}' "$SELF"; exit 0 ;;
   --push-main) shift; push_main_readout "$@"; exit $? ;;
+  # issue #66: the code fences as the fence rule reads them, as a readout
+  --fences) shift; fence_readout "$@"; exit $? ;;
 esac
 # issue #29: SELF is resolved, so this is the repo the program file belongs to, however the gate was started
 ROOT="$(cd -P "$(dirname "$SELF")/.." && pwd)"

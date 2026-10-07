@@ -437,6 +437,20 @@ scripts/gate.sh --help                         # the header of the gate file as 
 One `FILE:LINE: command` line per report, then the last line `push-main: ok files=N` (exit 0) or
 `push-main: FOUND hits=K files=N` (exit 1). A FILE that is no readable file ends with exit 2 and nothing is read.
 
+The code fences check 7 reads can be counted the same way (issue #66), with the fence rule of the check itself:
+
+```bash
+scripts/gate.sh --fences                       # README.md and every installed file of this repo
+scripts/gate.sh --fences agents/*.md           # only the files named
+```
+
+One `FILE:LINE: kind: text` line per line that is more than a plain fenced block, then the last line
+`fences: files=N blocks=B long=L inner=I unclosed=U` (exit 0 whatever the counts — it is a count, not a verdict;
+exit 2 and nothing read for a FILE that is no readable file). `long` is a block opened by four or more backticks or
+tildes, `inner` a line inside a block that starts like a fence line and does not close it (the other character, a
+shorter run, or text behind the run), `unclosed` a block that nothing closes before the end of the file. On
+2026-10-07 this repo had 62 blocks in 19 files and none of the three kinds.
+
 `scripts/readme-listing-check.sh` can be run on its own. It compares the tree in "What's Inside" and the `###`
 headings with `agents/`, `commands/`, `skills/` on disk, in both directions:
 
