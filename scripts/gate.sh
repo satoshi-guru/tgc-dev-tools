@@ -94,6 +94,12 @@ set -uo pipefail
 # when main was merged in. The header above is the valid one; these two lines are no usage text:
 #   Usage:  scripts/gate.sh            # run from anywhere; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
 #            scripts/gate.sh --selftest # proves the checks fail on 4 broken fixtures and pass on 2 good ones
+# Superseded by issue #84 (the long "Usage:" block is ordered by form), kept as a comment when main was merged in:
+# the three lines of the --selftest text as main had wrapped them with issue #57. Every count in them stands in the
+# header above, behind the forms; these three lines are no usage text:
+#            scripts/gate.sh --selftest # last line "selftest ok" (exit 0) or "selftest FAILED fail_lines=N" (exit 1) - issue #67, N = the lines above it
+#            that start with "selftest FAIL:"; it proves the checks fail on 28 broken fixtures and pass on 12 good ones (+ 29 line cases and 316 block cases
+#            for check 7, + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 
 # real_path FILE — absolute path of FILE with every symlink resolved (issue #29): a link to the file by readlink (a
 # chain of at most 40 links, relative targets read from the link's own directory), a link in the directory part by
