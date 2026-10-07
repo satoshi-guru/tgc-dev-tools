@@ -420,7 +420,13 @@ What it checks:
    behind it is content of the block and does not end it, and a block that nothing closes runs to the end of the
    file. Since issue #69 a line that starts with three or more backticks and carries a backtick behind them is no
    fence line: it is a sentence that starts with inline code and opens no block (before, it opened one that nothing
-   closed, and every fenced block behind it was read inverted). Accepted: a push of a branch
+   closed, and every fenced block behind it was read inverted). Since issue #24 two more commands count as
+   "`main` is checked out" for the push without a ref that follows them in the block: a switch or checkout with a
+   track option in front of a remote branch `<remote>/main` (`--track`, `-t`, and `--no-track` as well — git
+   derives the local name `main` from it), and a rename of the current branch to `main` with `git branch -m` or
+   `-M`. The name behind a new-branch option decides wherever it stands, and a rename away from `main` ends the
+   state. What git really does with each of these was measured with `scripts/branch-after-probe.sh` (below).
+   Accepted: a push of a branch
    (`git push -u origin feat/x`, also `maintenance` or `feat/main-menu`), a switch to `main` that is followed by a
    pull and no push (step 3 of "Update Workflow"), and prose without the command. The check reads the command, not
    the sentence around it: a quoted push to `main` is rejected even after a "never", so describe the rule in words
