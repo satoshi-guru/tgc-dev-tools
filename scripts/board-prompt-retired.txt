@@ -1,0 +1,9 @@
+# board-prompt-retired.txt — sentences that were taken out of what a lane of this board reads in its order.
+# Read by scripts/board-prompt-check.sh. One phrase per line, matched as fixed text, upper and lower case alike.
+# Lines that start with # and empty lines are no phrases. A phrase is added here in the pull request that retires
+# the sentence, with the issue and the reason in a comment above it; a line is never removed.
+
+# Issues #14 (role file) and #59 (board text): the skills have not "drifted". Four exist both here and in
+# ~/.claude/skills; one is a declared fork, one carries a declared appendix, and scripts/skill-drift.sh says
+# "in step". A lane that reads "have drifted" compares by hand again or reports a drift that is already declared.
+have drifted

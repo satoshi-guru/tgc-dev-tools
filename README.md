@@ -30,7 +30,9 @@ tgc-dev-tools/
 │   ├── readme-listing-check.sh # Does this README list every agent, command, skill and script?
 │   ├── link-start-probe.sh     # Does a program answer the same when started through a symlink? — see "Gate"
 │   ├── skill-drift.sh          # Do the skills here still match ~/.claude/skills? — see "Skills that also exist…"
-│   └── skill-drift-declared.txt # The deliberate differences skill-drift.sh accepts (one fork, one appendix)
+│   ├── skill-drift-declared.txt # The deliberate differences skill-drift.sh accepts (one fork, one appendix)
+│   ├── board-prompt-check.sh   # Does a lane's order (board text + role files) still carry a retired sentence? — see "Gate"
+│   └── board-prompt-retired.txt # The retired sentences board-prompt-check.sh looks for (one phrase per line)
 ├── .claude/agents/             # Board role files bb-* for this repo's own build lanes (not installed)
 └── install.sh                  # One-command install into a project's .claude (destination required)
 ```
@@ -462,6 +464,28 @@ on the status call, a red selftest) and starts itself through links in its own `
 
 `scripts/skill-drift.sh` is deliberately **not** a gate check (it reads `~/.claude/skills`, which differs per
 machine and changes without a commit here); see "Skills that also exist in `~/.claude/skills`".
+
+`scripts/board-prompt-check.sh` is not a gate check either, for the same reason: it reads the board directory. An
+order for a build lane of this repo has two sources that are written at different times — the role file
+(`.claude/agents/bb-*.md`, changed here by pull request) and the board's project texts ("Warum", "Grenzen",
+"Selbstprüfung" in `boards.json` of the board directory, outside this repo, written at onboarding). A sentence
+corrected in one of them stays in the other until someone looks (issue #59: the role file no longer said the skills
+"have drifted", the board text still did). The program looks for every phrase of
+`scripts/board-prompt-retired.txt` in both. Read-only: it gets the board texts through the board kernel and never
+opens `boards.json` itself.
+
+```bash
+scripts/board-prompt-check.sh               # 'STALE board <key>: "<phrase>"' / 'STALE role <file>:<line>: "<phrase>"' lines, then "board-prompt: ok phrases=1 texts=5 role-files=3" (exit 0) or "board-prompt: STALE hits=K …" (exit 1)
+scripts/board-prompt-check.sh --board DIR   # another board directory (default $BLACKBOARD_DIR, else ~/.claude/boards/tgc-dev-tools)
+scripts/board-prompt-check.sh --selftest    # 7 cases on temp fixtures
+```
+
+- Exit 2 when nothing could be read (no `boards.json` in the directory, no kernel, no phrase in the file): a check
+  that read nothing is never green.
+- Retiring a sentence takes three steps: change the role file by pull request, add the phrase with its issue to
+  `scripts/board-prompt-retired.txt` in the same pull request, and change the board text with
+  `python3 ~/.claude/scripts/dev/blackboard.py prompt-texte --warum "…"` (it writes only the key that is named;
+  without an option it shows the texts). Then run the program: exit 0.
 
 ---
 
