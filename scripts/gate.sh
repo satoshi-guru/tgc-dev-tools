@@ -66,7 +66,7 @@
 #          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or
 #          skills/ - issue #45, and 3 with one or all of them empty - issue #53, + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
 #          + 9 starts of the gate file with --fences - issue #66, 2 of them since issue #69,
-#          + 3 starts of install.sh whose "Done. Installed ..." line is read, 2 of them beside entries it does not copy - issue #54,
+#          + 4 starts of install.sh whose "Done. Installed ..." line is read, 3 of them beside entries it does not copy - issue #54,
 #          + 7 runs of the step that prints the selftest's last line, each over a stand-in for the cases - issue #67)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 #          scripts/gate.sh --push-main [FILE ...]  # check 7 alone, as a readout (issue #25): one "FILE:LINE: command" line
@@ -2240,7 +2240,16 @@ FAIL: skills/x/shared -> ../../shared: $why51" '#51' || rc=1
   #                   agents/drafts/, commands/NOTES.txt and commands/README (no ending) -> 2, 1, 2 (before:
   #                   "Installed 4 agents, 3 commands, 2 skills."). Three different numbers, so a line that prints
   #                   one counter three times is seen
-  # 3 starts: 1 on a source with nothing but what is installed, 2 on a source with entries that are not installed.
+  #   countsrc/none:  agents/ with NOTES.txt only, command c.md, skills/ with loose.txt only - nothing to install in
+  #                   two of the three folders, which the loops skip since issue #53 -> 0, 1, 0 and nothing on
+  #                   stderr (before: "Installed 1 agents, 1 commands, 0 skills." behind an error line of ls, whose
+  #                   pattern skills/*/ had matched nothing)
+  # 4 starts: 1 on a source with nothing but what is installed, 3 on a source with entries that are not installed.
+  mkdir -p "$t/countsrc/none/agents" "$t/countsrc/none/commands" "$t/countsrc/none/skills"
+  cp "$(dirname "$SELF")/../install.sh" "$t/countsrc/none/install.sh"
+  printf 'notes, not an agent\n' > "$t/countsrc/none/agents/NOTES.txt"
+  printf 'cmd\n' > "$t/countsrc/none/commands/c.md"
+  printf 'a loose file, not a skill\n' > "$t/countsrc/none/skills/loose.txt"
   local cinst cs
   cinst="$(dirname "$SELF")/../install.sh"
   for cs in clean notes mixed; do
@@ -2263,6 +2272,7 @@ FAIL: skills/x/shared -> ../../shared: $why51" '#51' || rc=1
   install_count_case "installer, Done line with a NOTES.txt in agents/ and commands/ and a loose file in skills/" "$t/cwd" "$t/countsrc/notes" "$t/countdest/notes/.claude" 1 1 1 "$inst" || rc=1
   install_count_case "installer, Done line with files and a directory in agents/ and commands/ that are no *.md" "$t/cwd" "$t/countsrc/mixed" "$t/countdest/mixed/.claude" 2 1 2 \
     $'./agents/a.md\n./agents/b.md\n./commands/c.md\n./skills/x/SKILL.md\n./skills/y/SKILL.md' || rc=1
+  install_count_case "installer, Done line with nothing to install in agents/ and skills/" "$t/cwd" "$t/countsrc/none" "$t/countdest/none/.claude" 0 1 0 './commands/c.md' || rc=1
   # installer source cases (issue #45): install.sh of this repo in a directory that is not a checkout of it,
   # started with bash in an empty directory, each time with a destination below the temp dir that does not exist.
   # Every start ends with exit 1 and one line that names the source and what it lacks, and the destination still
