@@ -416,8 +416,11 @@ readme_push_main() {
 # A symlink to a file is printed by the path of the link, so its content is read: install.sh copies an agent or
 # command with a plain cp, which copies what the link points to, and an entry of a skill with cp -r, which copies
 # the link itself - on the machine of the install that link still leads to the same content. Not printed: a link
-# that leads to no file, and what lies behind a link to a directory (cp -r copies that link, find does not enter
-# it).
+# that leads to no file.
+# A symlink to a directory inside a skill is not entered here (cp -r copies that link, find does not go behind it),
+# and since issue #51 it does not have to be: run_checks rejects every such link (skill_dir_links below), so a tree
+# the gate accepts has no installed content behind one. Until then this comment listed the form as not read, and a
+# push instruction in a file behind such a link passed check 7 (measured with the fixture tooldirlink).
 # Superseded first form of this function (same branch, before the symlink cases toolagentlink and toolskilllink):
 # the agents and commands loop also tested [ ! -L "$f" ] and the skills loop ran find "$e" -type f -print0, so a
 # linked file was never read and a command behind it passed check 7.
@@ -435,6 +438,31 @@ tool_files() {
         while IFS= read -r -d '' f; do
           [ -f "$f" ] && printf '%s\0' "$f"
         done < <(find "$e" \( -type f -o -type l \) -print0)
+      done
+    done
+  } | LC_ALL=C sort -z
+}
+
+# skill_dir_links ROOT — prints, each ended by a NUL byte and sorted by byte value, the path of every symlink to a
+# directory below a skills/<name>/ of ROOT (issue #51), at any depth of what install.sh copies. The entries of a
+# skill are taken the way tool_files and install.sh take them (three patterns, the entry named evals skipped), so a
+# skill's own evals - a folder or a link - stays out: it is not installed. find does not follow a link, so each
+# link is printed once and nothing behind it is walked; [ -d ] is true for a link that leads to a directory,
+# wherever that directory is (outside the skill, outside the repo, or a folder of the same skill).
+# Not printed: a symlink to a file (allowed, tool_files prints it and check 7 reads it), a link that leads nowhere,
+# and a skills/<name> that is itself a link to a directory (install.sh and tool_files both go through it, so its
+# files are installed as files and read).
+skill_dir_links() {
+  local root="$1" f d e
+  {
+    for d in "$root"/skills/*/; do
+      [ -d "$d" ] || continue
+      for e in "$d"* "$d".[!.]* "$d"..?*; do
+        [ -e "$e" ] || continue
+        [ "$(basename "$e")" = "evals" ] && continue
+        while IFS= read -r -d '' f; do
+          [ -d "$f" ] && printf '%s\0' "$f"
+        done < <(find "$e" -type l -print0)
       done
     done
   } | LC_ALL=C sort -z
@@ -665,6 +693,14 @@ run_checks() {
   # installed into (which push rule holds in hl_claw_bot is the open decision of issue #47) gets a declared
   # exception - a file with one line per exception and its reason, like scripts/skill-drift-declared.txt - when
   # the first one exists; until then such a command is reworded as a sentence or the gate stays red.
+  # issue #51: the reader below does not go behind a symlink to a directory inside a skill, and install.sh copies
+  # such a link as a link - on the machine of the install it still leads to its files, in a project elsewhere it
+  # leads nowhere. Either way the skill does not carry its own files, so the link itself is rejected: one FAIL per
+  # link (skill_dir_links), named by its path below the root and by the target as the link carries it. With that, a
+  # tree this check accepts has no installed file it did not read. A symlink to a file stays allowed and is read.
+  while IFS= read -r -d '' f; do
+    fail "${f#"$root"/} -> $(readlink "$f"): symlink to a directory inside a skill (issue #51: install.sh copies the link and not the files behind it, and check 7 does not read them - a skill carries its own files)"
+  done < <(skill_dir_links "$root")
   while IFS= read -r -d '' f; do
     while IFS= read -r out; do
       [ -n "$out" ] || continue
