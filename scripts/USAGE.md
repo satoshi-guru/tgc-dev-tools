@@ -23,7 +23,7 @@ branch-after-probe.sh — which branch does a git command leave checked out, and
 Usage:   scripts/branch-after-probe.sh 'COMMAND' ['COMMAND' ...]   # a COMMAND is a git command line without the word
                                                                   # git; several steps are joined with " ; "
          scripts/branch-after-probe.sh 'switch --track origin/main' 'switch main ; branch -m trunk'
-         scripts/branch-after-probe.sh --selftest                  # 26 commands against the answers written down here
+         scripts/branch-after-probe.sh --selftest                  # 58 commands against the answers written down here
          scripts/branch-after-probe.sh --help                      # this header
 Output:  one line per COMMAND "branch=B push=P push-head=H exit=N | COMMAND", then the last line
          "branch-after: commands=N on-main=K"
@@ -42,7 +42,7 @@ Usage: scripts/gate.sh [--selftest | --push-main [FILE ...] | --fences [FILE ...
        checks had pushed the long form to line 42)
 
 Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-         scripts/gate.sh --selftest # proves the checks fail on 28 broken fixtures and pass on 12 good ones (+ 29 line cases and 273 block cases for check 7,
+         scripts/gate.sh --selftest # proves the checks fail on 28 broken fixtures and pass on 12 good ones (+ 29 line cases and 316 block cases for check 7,
          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or skil
          + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
