@@ -1591,6 +1591,74 @@ EOF
   push_block '' "$F" 'git branch -M main' 'git push -u origin feat/x' "$F" || rc=1
   push_block '' "$F" 'git branch -M main' "$F" '' "$F" 'git push' "$F" || rc=1
   push_block '' 'After `git branch -M main` the remote is added.' 'Then `git push` the branch.' || rc=1
+  # block cases for check 7 (issue #75), how the options of a switch or checkout are read - three ways to write one
+  # that the reader of issue #24 took for something else. What git does with each command was measured with
+  # scripts/branch-after-probe.sh (git 2.43.0, 2026-10-07); its selftest holds the same forms.
+  # form 16 — an option that takes a value as its own word (--conflict <style>, and at checkout
+  # --pathspec-from-file <file>): the word behind it is the value, not the branch. 8 reported, 4 left alone.
+  # reported: the command of the issue, at checkout too, the three styles, in one line, with a track option behind
+  # it, and the file option of checkout (the probe: with a file that names no path git switches the branch)
+  push_block 3 "$F" 'git switch --conflict diff3 main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout --conflict merge main' 'git push origin' "$F" || rc=1
+  push_block 1 'git switch --conflict zdiff3 main && git push' || rc=1
+  push_block 3 "$F" 'git switch --conflict diff3 --track origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout --pathspec-from-file list.txt main' 'git push' "$F" || rc=1
+  push_block 4 "$F" 'git switch feat/x' 'git switch --conflict diff3 main' 'git push -u origin HEAD' "$F" || rc=1
+  # reported before too, and still: the value glued to the option with "=", and an option whose value is optional -
+  # git takes the word behind --recurse-submodules for the branch (the probe: main is checked out)
+  push_block 3 "$F" 'git switch --conflict=diff3 main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git switch --recurse-submodules main' 'git push' "$F" || rc=1
+  # left alone: the branch behind the value is another one; and the value itself is called main (git rejects the
+  # style and stays where it was - before, the word main behind the option was read as the branch)
+  push_block '' "$F" 'git switch --conflict diff3 feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git switch --conflict diff3 feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch --conflict main feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git checkout --pathspec-from-file main feat/x' 'git push' "$F" || rc=1
+  # form 17 — short options written as one word (-ft, -qt, -fd): every letter is an option of its own, and a
+  # letter that takes a value takes the rest of the word. 6 reported, 5 left alone.
+  # reported: the command of the issue, at checkout, another letter in front, the mode glued to -t, in an indented
+  # block, and a new-branch letter at the end of the word with the name main behind it (reported before too)
+  push_block 3 "$F" 'git switch -ft origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout -ft origin/main' 'git push origin' "$F" || rc=1
+  push_block 3 "$F" 'git checkout -qt upstream/main' 'git push -u origin HEAD' "$F" || rc=1
+  push_block 3 "$F" 'git switch -tdirect origin/main' 'git push' "$F" || rc=1
+  push_block 2 '    git switch -ft origin/main' '    git push' || rc=1
+  push_block 3 "$F" 'git switch -fc main' 'git push' "$F" || rc=1
+  # left alone: the remote branch is not main; the word carries the letter of --detach (before, -fd was no detach
+  # option, and the word main behind it set the state); and a new-branch letter with another name behind it
+  push_block '' "$F" 'git switch -ft origin/feature' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch -ft origin/topic/main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch -fd main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git switch -fd origin/main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git switch -fc feat/x' 'git push' "$F" || rc=1
+  # form 18 — the name glued to a new-branch option: -cmain, -Cmain, -bmain, -Bmain, behind other letters too
+  # (-fcmain), and the long options with "=" (--create=main, --force-create=main, --orphan=main).
+  # 11 reported, 9 left alone.
+  # reported: the two commands of the issue, the forced letters, a start point behind the name, another letter in
+  # front, the three long options, the name in quotes, and the subcommand in quotes (form 8)
+  push_block 3 "$F" 'git switch -cmain' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout -bmain' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git switch -Cmain origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout -Bmain' 'git push origin' "$F" || rc=1
+  push_block 3 "$F" 'git switch -fcmain' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git switch --create=main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git switch --force-create=main origin/main' 'git push' "$F" || rc=1
+  push_block 3 "$F" 'git checkout --orphan=main' 'git push -u origin HEAD' "$F" || rc=1
+  push_block 3 "$F" 'git switch -c"main"' 'git push' "$F" || rc=1
+  push_block 1 'git switch -cmain && git push' || rc=1
+  push_block 3 "$F" 'git "switch" -cmain' 'git push' "$F" || rc=1
+  # left alone: the glued name is another one - before, the word was skipped as an option, so the state of the
+  # switch to main in front of it lived on, and a start point main behind it set the state
+  push_block '' "$F" 'git switch main' 'git switch -cfeat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git checkout main' 'git checkout -bfeat/x' 'git push origin' "$F" || rc=1
+  push_block '' "$F" 'git switch main' 'git switch --create=feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch -cfeat/x main' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch -cmaintenance' 'git push' "$F" || rc=1
+  # the state is cleared and scoped as for git switch main
+  push_block '' "$F" 'git switch -cmain' 'git switch feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git switch -cmain' 'git push -u origin feat/x' "$F" || rc=1
+  push_block '' "$F" 'git switch -cmain' "$F" '' "$F" 'git push' "$F" || rc=1
+  push_block '' 'After `git switch -cmain` the install runs.' 'Then `git push` the branch.' || rc=1
   # pushwrapped / pushonmain / pushflow: the same through run_checks, like pushmain above (block at line 20). The
   # wrapped command is named at the line where it starts (21), the push without a ref at its own line (22); the
   # step-3 block of the real README (switch to main, pull, install) stays accepted.
