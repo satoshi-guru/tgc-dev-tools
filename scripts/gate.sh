@@ -32,12 +32,15 @@
 #      (lines with four blanks or a tab in front, no fence; an empty line between them does not end the block).
 #      Since issue #49 also: a line of three backticks or tildes is a fence line only with at most three blanks and
 #      no tab in front; indented further it is one more line of that indented block and no longer ends the state.
+#      Since issue #66 also: a fenced block is closed only by a line of the character that opened it, with a run at
+#      least as long and nothing but blanks behind it; a line of the other character, a shorter run or a run with
+#      text behind it is content of the block and no longer ends the state.
 #      Since issue #25 the same reader also runs over every file install.sh copies into a project: agents/*.md,
 #      commands/*.md and every file of a skill (hidden ones and symlinked ones too) except its evals/. One FAIL per
 #      command line there as well, named by the path of the file below the root. No exceptions file exists: the
 #      readout of 2026-10-06 over the 18 installed files reported nothing (see the comment at the check)
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 24 broken fixtures and pass on 10 good ones (+ 29 line cases and 182 block cases for check 7,
+#          scripts/gate.sh --selftest # proves the checks fail on 24 broken fixtures and pass on 10 good ones (+ 29 line cases and 205 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or skills/ - issue #45,
 #          + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
@@ -198,8 +201,31 @@ FENCE_AWK='
 #     so a switch to main and a push without a ref inside it are reported as before - but the state is no longer
 #     ended by its fence lines: it lives as long as the lines stay indented (empty lines included), also from one
 #     such block into the next of the same list item. That can only report more.
-#     Not changed: fences of more than three characters, the rule that a closing fence has to be as long as the
-#     opening one and of the same character, and an info string - any fence line toggles, as before.
+#     What closes a fenced block was not part of issue #49; it is the rule of issue #66, see the block below. An
+#     opening line may carry text behind its run (an info string), as before.
+# Superseded by the two lines above (issue #66), kept as a comment - this was the last sentence of the block:
+#   Not changed: fences of more than three characters, the rule that a closing fence has to be as long as the
+#   opening one and of the same character, and an info string - any fence line toggles, as before.
+# Also reported since issue #66:
+#   - what closes a fenced block, the CommonMark rule (FENCE_AWK above): the block is closed only by a line of the
+#     character that opened it (backticks or tildes), with a run at least as long as the opening one and nothing but
+#     blanks or tabs behind it. Every other line that starts like a fence line is content of the block and leaves
+#     the "main is checked out" state as it is: a line of tildes in a backtick block and the other way round, a run
+#     of three inside a block opened by four (how a file shows a fenced block), and a run with text behind it
+#     (inside a block there is no info string). So a switch to main, such a line and a push without a ref in one
+#     fenced block are reported (before, any fence line toggled the fence and cleared the state). The join of a
+#     wrapped command follows the same rule: inside a block a line that ends in a backslash is joined with such a
+#     line, and still not with the line that closes the block.
+#     A block that nothing closes runs to the end of the file, and the state with it. That can only report more.
+#     No longer reported: what stood behind a block whose inner fence-like line had ended it for the reader - the
+#     real closing line then opened a block that lasted to the next fence line, and the state lived across lines
+#     that stand outside every block.
+#     Measured before the change with scripts/gate.sh --fences (2026-10-07): the files check 7 reads in this repo,
+#     README.md and the 18 installed ones, carry 62 fenced blocks, none opened by four or more characters, no such
+#     inner line and no unclosed block - the rule changes no report there.
+#     Accepted limit, unchanged: an opening line of backticks whose info string carries a backtick (three backticks,
+#     a word, three backticks, text) is inline code in CommonMark and opens nothing; this check reads it as an
+#     opening line, as before. A closing line is never read that way, since it has nothing but blanks behind it.
 # Superseded by the block above (issue #32), kept as a comment - this stood at the head of "Still not seen":
 #   an indented code block (four blanks or a tab, no fence) - a switch to main in one of its lines and a push
 #   without a ref in the next are two lines outside a fence, so the state is gone (the fourth form of issue #30,
@@ -232,7 +258,8 @@ FENCE_AWK='
 # a branch, clears the state), state carried from one code block to the next, a push configured elsewhere
 # (push.default, remote.*.push, an alias), and prose: the check reads commands, not sentences.
 readme_push_main() {
-  awk '
+  # issue #66: the fence rule (fence_run, fence_change) comes from FENCE_AWK, in front of the program
+  awk "$FENCE_AWK"'
     function issep(t) { return (t == "&&" || t == "||" || t == "|" || t == ";" || t == "`" || t ~ /^#/) }
     # \047 is the single quote: the awk program itself stands in single quotes, so it cannot be written literally
     function bare(t) { gsub(/^["\047(]+|[.,:;!?)"\047]+$/, "", t); return t }
@@ -240,6 +267,23 @@ readme_push_main() {
     END {
       fence = 0; onmain = 0; found = 0; block = 0
       for (r = 1; r <= NR; r = nx) {
+        # issue #66 - the state lines of the fence and of the indented block, moved here from behind the join (the
+        # comments on the indented block and on the indent of a fence line are still there). They read only L[r],
+        # so nothing changes for them. The fence rule is the one of FENCE_AWK: outside a fenced block every fence
+        # line opens one and its character and length are kept; inside, only a line of that character with a run
+        # at least as long and nothing but blanks or tabs behind it closes it. Opening and closing clear the
+        # state, as every fence line did before; a line that only looks like a fence line inside a block is
+        # content and leaves the state as it is. A block that nothing closes lasts to the end of the file.
+        if (fence_change(L[r])) {
+          if (fence) fence = 0
+          else { fence = 1; fch = FCH; flen = FLEN }
+          onmain = 0; block = 0
+        }
+        else if (!fence) {
+          if (L[r] ~ /^[ \t]*$/) { }
+          else if (L[r] ~ /^(    | ? ? ?\t)/) { if (!block) onmain = 0; block = 1 }
+          else { onmain = 0; block = 0 }
+        }
         # one logical line: the physical lines r .. nx-1, joined where a line ends in a backslash
         n = 0; text = ""; nx = r
         do {
@@ -248,7 +292,13 @@ readme_push_main() {
           #   if (s ~ /\\$/ && nx < NR && L[nx + 1] !~ /^[ \t]*(```|~~~)/) {
           # A fence line has at most three blanks and no tab in front (see the state lines below); a line of three
           # backticks or tildes that is indented further is no fence, so a wrapped command is joined with it too.
-          if (s ~ /\\$/ && nx < NR && L[nx + 1] !~ /^ ? ? ?(```|~~~)/) {
+          # Superseded by issue #66, kept as a comment - the fence test of the join did not know the open block:
+          #   if (s ~ /\\$/ && nx < NR && L[nx + 1] !~ /^ ? ? ?(```|~~~)/) {
+          # The next line ends the join only when it changes the fence state as it is at this line (fence_change):
+          # outside a block every fence line, inside one only the line that closes it. A line of the other
+          # character, a shorter run, or a run with text behind it is content there, and a wrapped command is
+          # joined with it.
+          if (s ~ /\\$/ && nx < NR && !fence_change(L[nx + 1])) {
             cont = 1; sub(/[ \t]*\\$/, "", s)
           }
           if (nx > r) sub(/^[ \t]+/, "", s)
@@ -274,12 +324,15 @@ readme_push_main() {
         # or by a tab after at most three blanks, such a line is read like any other: outside a fence it falls
         # into the indented-block branch below and keeps the state, inside a fence it is content and does not
         # close the fence.
-        if (L[r] ~ /^ ? ? ?(```|~~~)/) { fence = !fence; onmain = 0; block = 0 }
-        else if (!fence) {
-          if (L[r] ~ /^[ \t]*$/) { }
-          else if (L[r] ~ /^(    | ? ? ?\t)/) { if (!block) onmain = 0; block = 1 }
-          else { onmain = 0; block = 0 }
-        }
+        # Superseded by issue #66, kept as a comment - every fence line toggled, whatever had opened the block:
+        #   if (L[r] ~ /^ ? ? ?(```|~~~)/) { fence = !fence; onmain = 0; block = 0 }
+        #   else if (!fence) {
+        #     if (L[r] ~ /^[ \t]*$/) { }
+        #     else if (L[r] ~ /^(    | ? ? ?\t)/) { if (!block) onmain = 0; block = 1 }
+        #     else { onmain = 0; block = 0 }
+        #   }
+        # These state lines now stand in front of the join, at the head of the loop (see there): the join asks
+        # fence_change about the next line, and the answer has to be given with the state this line leaves.
         hit = 0
         for (i = 1; i < n && !hit; i++) {
           # the command word: git at the start of the word, after a character that is no part of a name ("git,
