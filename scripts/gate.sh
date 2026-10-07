@@ -39,16 +39,19 @@
 #      Since issue #66 also: a fenced block is closed only by a line of the character that opened it, with a run at
 #      least as long and nothing but blanks behind it; a line of the other character, a shorter run or a run with
 #      text behind it is content of the block and no longer ends the state.
+#      Since issue #69 also: a line that starts with a run of backticks and carries a backtick behind the run is no
+#      fence line - it is a sentence that starts with inline code, opens no block and no longer keeps the state alive
+#      to the end of the file (or reads the blocks behind it inverted, which also hid a push inside them).
 #      Since issue #25 the same reader also runs over every file install.sh copies into a project: agents/*.md,
 #      commands/*.md and every file of a skill (hidden ones and symlinked ones too) except its evals/. One FAIL per
 #      command line there as well, named by the path of the file below the root. No exceptions file exists: the
 #      readout of 2026-10-06 over the 18 installed files reported nothing (see the comment at the check)
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
-#          scripts/gate.sh --selftest # proves the checks fail on 24 broken fixtures and pass on 10 good ones (+ 29 line cases and 205 block cases for check 7,
+#          scripts/gate.sh --selftest # proves the checks fail on 24 broken fixtures and pass on 10 good ones (+ 29 line cases and 222 block cases for check 7,
 #          + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #          + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35, and 4 in a source without agents/, commands/ or skills/ - issue #45,
 #          + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
-#          + 7 starts of the gate file with --fences - issue #66)
+#          + 9 starts of the gate file with --fences - issue #66, 2 of them since issue #69)
 #          of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 #          scripts/gate.sh --push-main [FILE ...]  # check 7 alone, as a readout (issue #25): one "FILE:LINE: command" line
 #          per reported command, then the last line "push-main: ok files=N" (exit 0) or "push-main: FOUND hits=K files=N"
@@ -116,8 +119,14 @@ frontmatter_ok() {
 # character of the run, FLEN to its length and FREST to what stands behind it. fence_change(s) says whether s
 # changes the state held in the globals fence / fch / flen: it opens a block (fence is 0) or closes the open one.
 # The caller changes the state: opening is fence = 1; fch = FCH; flen = FLEN, closing is fence = 0.
-# Not part of the rule here: an opening line of backticks whose info string carries a backtick is inline code in
-# CommonMark and opens nothing there; here it opens a block, as every such line did before issue #66.
+# Superseded by issue #69, kept as a comment - these two lines closed the block above:
+#   Not part of the rule here: an opening line of backticks whose info string carries a backtick is inline code in
+#   CommonMark and opens nothing there; here it opens a block, as every such line did before issue #66.
+# Since issue #69 that is part of the rule, in fence_run:
+#   - a run of backticks with a backtick somewhere behind it is no fence line (in CommonMark the info string of a
+#     backtick fence may not carry a backtick): the line is a line of a paragraph that starts with inline code, it
+#     opens nothing and fence_run returns 0 for it. A run of tildes may carry backticks behind it and still opens.
+#     Inside a fenced block the test changes nothing: such a line has text behind its run, so it never closed.
 FENCE_AWK='
     # The blanks in front are counted by hand. The first form of this function (same branch) dropped them with
     # sub(/^ ? ? ?/, "", s); run with mawk 1.3.4, a fence line with one to three blanks in front was then no fence
@@ -132,6 +141,10 @@ FENCE_AWK='
       m = 1
       while (substr(s, b + m + 1, 1) == c) m++
       if (m < 3) return 0
+      # issue #69: a run of backticks with a backtick behind it is inline code at the start of a line, no fence
+      # line. Tested with index(), which needs no pattern (see the note on sub() above). The globals are left as
+      # they were, as at every other return 0.
+      if (c == "`" && index(substr(s, b + m + 1), "`") > 0) return 0
       FCH = c; FLEN = m; FREST = substr(s, b + m + 1)
       return m
     }
@@ -227,9 +240,35 @@ FENCE_AWK='
 #     Measured before the change with scripts/gate.sh --fences (2026-10-07): the files check 7 reads in this repo,
 #     README.md and the 18 installed ones, carry 62 fenced blocks, none opened by four or more characters, no such
 #     inner line and no unclosed block - the rule changes no report there.
-#     Accepted limit, unchanged: an opening line of backticks whose info string carries a backtick (three backticks,
-#     a word, three backticks, text) is inline code in CommonMark and opens nothing; this check reads it as an
-#     opening line, as before. A closing line is never read that way, since it has nothing but blanks behind it.
+#     No longer a limit since issue #69 (see the block below): an opening line of backticks whose info string
+#     carries a backtick is inline code in CommonMark, and this check now reads it that way too.
+# Superseded by the two lines above (issue #69), kept as a comment - this was the last sentence of the block:
+#   Accepted limit, unchanged: an opening line of backticks whose info string carries a backtick (three backticks,
+#   a word, three backticks, text) is inline code in CommonMark and opens nothing; this check reads it as an
+#   opening line, as before. A closing line is never read that way, since it has nothing but blanks behind it.
+# No longer reported since issue #69:
+#   - what stood behind a sentence that starts with inline code in three or more backticks. A line that starts,
+#     behind at most three blanks, with a run of backticks and carries a backtick somewhere behind the run is no
+#     fence line (fence_run in FENCE_AWK; in CommonMark the info string of a backtick fence may not carry a
+#     backtick). It is a line of a paragraph: it opens no block, and a switch to main inside its inline code lives
+#     for that line only. Before, the line opened a block that nothing closed and the state lived to the end of the
+#     file, across prose, to the next push without a ref.
+#     Reported since then, and missed before: a switch to main and a push without a ref in a real fenced block
+#     behind such a sentence. The sentence had opened a block for the check, so the opening line of the real block
+#     closed it and its closing line opened the next one - every block behind the sentence was read inverted, and
+#     the two commands were two lines between blocks. The issue names only the report too many; this one was found
+#     while the cases were written (selftest, form 13).
+#     The join of a wrapped command follows the same rule: a line that ends in a backslash is joined with such a
+#     sentence, and still not with a real opening line.
+#     Unchanged: a run of tildes may carry backticks behind it and still opens a block (the info string of a tilde
+#     fence may hold any character); an info string without a backtick; inside a fenced block such a line was
+#     content before and is content now, since a closing line has nothing but blanks behind its run; and the command
+#     inside the inline code is read as before (a push to main there is a report at that line).
+#     Measured with scripts/gate.sh --fences before and after the change (2026-10-07): README.md and the 18 installed
+#     files carry 63 fenced blocks, none long, no inner line, none unclosed, both times - no file check 7 reads here
+#     has such a line, the rule changes no report in this repo.
+#     The test reads one line, as CommonMark does: a line that starts with three backticks and carries no further
+#     backtick is an opening line there as well, even when a later line would close the run as inline code.
 # Superseded by the block above (issue #32), kept as a comment - this stood at the head of "Still not seen":
 #   an indented code block (four blanks or a tab, no fence) - a switch to main in one of its lines and a push
 #   without a ref in the next are two lines outside a fence, so the state is gone (the fourth form of issue #30,
@@ -489,6 +528,9 @@ push_main_readout() {
 #              before issue #66) ends the block here; where a file has no such line, both readers see the same blocks
 #   unclosed - the line opens a fenced block that nothing closes before the end of the file ("long, unclosed" when
 #              it is both)
+# Since issue #69 a line that starts with a run of backticks and carries a backtick behind the run is no fence line
+# for fence_run. Outside a block it opens none and is not counted; inside a block it is content and is not named as
+# an inner line either (before, it was: it started like a fence line for the rule of that time).
 # Carriage returns at the end of a line are dropped first, as readme_push_main does.
 fence_lines() {
   awk "$FENCE_AWK"'
