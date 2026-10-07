@@ -1182,6 +1182,54 @@ EOF
   push_block '' '    git switch main' "    $F" '    git switch feat/x' '    git push' || rc=1
   push_block '' '    git add README.md' "    $F" '    git push' || rc=1
   push_block '' '- a:' '' "    $F" '    git switch main' "    $F" '' '- b:' '' "    $F" '    git push' "    $F" || rc=1
+  # block cases for check 7 (issue #66), what closes a fenced block. F4 is a fence of four backticks.
+  # form 12 — a fenced block is closed only by a line of the character that opened it, with a run at least as long
+  # as the opening one and nothing but blanks or tabs behind it (the CommonMark rule, FENCE_AWK). Every other line
+  # that starts like a fence line is content there and does not end the state: 12 reported, 11 left alone.
+  local F4='````'
+  # the two forms of the issue: a line of tildes inside a backtick block, and a line of three backticks inside a
+  # block of four (how a README shows a fenced block)
+  push_block 4 "$F" 'git switch main' '~~~' 'git push' "$F" || rc=1
+  push_block 4 "$F4" 'git switch main' "$F" 'git push' "$F4" || rc=1
+  # what the issue names as not measured: the other direction, and text behind the run (in CommonMark it does not
+  # close); then a shorter run of tildes, and the inner line with three blanks in front
+  push_block 4 '~~~' 'git switch main' "$F" 'git push' '~~~' || rc=1
+  push_block 4 "$F" 'git switch main' "${F}bash" 'git push' "$F" || rc=1
+  push_block 4 '~~~~' 'git switch main' '~~~' 'git push origin' '~~~~' || rc=1
+  push_block 4 "$F" 'git switch main' '   ~~~' 'git push' "$F" || rc=1
+  # a fenced block shown inside a longer one: the inner opening line carries an info string and ended the outer
+  # block before, so the two commands were two lines outside a fence
+  push_block 4 "${F4}markdown" "${F}bash" 'git switch main' 'git push' "$F" "$F4" || rc=1
+  # a block that nothing closes runs to the end of the file, and the state with it (it can only report more)
+  push_block 5 "$F4" 'git switch main' "$F" 'Some prose.' 'git push' || rc=1
+  # after a long block that is closed by its own kind, the next line of three backticks opens a block. Before, the
+  # four fence lines were read as two blocks and the commands stood outside
+  push_block 7 "$F4" 'git switch feat/x' "$F" "$F4" "$F" 'git switch main' 'git push' "$F" || rc=1
+  # lines that end in a carriage return
+  push_block 4 "$F4$R" "git switch main$R" "$FR" "git push$R" "$F4$R" || rc=1
+  # the second place of the rule, the join of a wrapped command: inside a backtick block a line that ends in a
+  # backslash is joined with a line that starts with tildes, it closes nothing. Built for that place - ~~~ stands
+  # where the remote is.
+  push_block 2 "$F" 'git push \' '~~~ origin main' "$F" || rc=1
+  # the twelfth was reported before issue #66 too: outside a block a line of tildes opens one, as before
+  push_block 4 'text' '~~~' 'git switch main' 'git push' '~~~' || rc=1
+  # left alone. What closes a block still ends the state: the same run, a longer one, blanks or a tab behind it
+  push_block '' "$F4" 'git switch main' "$F4" 'git push' || rc=1
+  push_block '' "$F" 'git switch main' "$F4" 'git push' || rc=1
+  push_block '' '~~~' 'git switch main' '~~~~~' 'git push' || rc=1
+  push_block '' "$F" 'git switch main' "$F  " 'git push' || rc=1
+  push_block '' "$F" 'git switch main' "$F$T" 'git push' || rc=1
+  # the inner line carries no state out of its block, and changes nothing about what clears the state inside it
+  push_block '' "$F4" 'git switch main' "$F" "$F4" 'git push' || rc=1
+  push_block '' "$F" 'git switch main' '~~~' 'git switch feat/x' 'git push' "$F" || rc=1
+  push_block '' "$F" 'git add README.md' '~~~' 'git push' "$F" || rc=1
+  push_block '' "$F4" 'git switch main' "$F" 'git push -u origin feat/x' "$F4" || rc=1
+  # a wrapped command is still not joined with the line that closes its block
+  push_block '' "$F" 'git push \' "$F" 'origin main' || rc=1
+  # no longer reported: before issue #66 the line of three backticks ended the block of four and the closing line of
+  # four opened one that nothing closed, so the state lived across the prose to the push in line 7. The three lines
+  # behind the block are lines outside a fence, where the state lives for one line.
+  push_block '' "$F4" 'text' "$F" "$F4" 'git switch main' 'Some prose.' 'git push' || rc=1
   # pushwrapped / pushonmain / pushflow: the same through run_checks, like pushmain above (block at line 20). The
   # wrapped command is named at the line where it starts (21), the push without a ref at its own line (22); the
   # step-3 block of the real README (switch to main, pull, install) stays accepted.
@@ -1399,8 +1447,8 @@ EOF
   #   pm/clean.md: one plain block (the fixture of --push-main above); pmrepo: the README of the fixtures has one
   # 7 starts with --fences: 4 with files that can be read (the 13 lines, a plain block, three files in one start,
   # the indented fence lines), 2 with a FILE that is none (missing next to one that can be read, a directory),
-  # 1 without a FILE (pmrepo).
-  local F4='````'
+  # 1 without a FILE (pmrepo). F4 is the fence of four backticks of form 12 above; it was declared here before the
+  # block cases of form 12 existed (superseded, kept as a comment): local F4=(four backticks in single quotes)
   mkdir -p "$t/fx/sub"
   printf '%s\n' "$F4" "$F" "$F4" "$F" '~~~' "${F}bash" "$F" "    $F" '~~~~ info' '~~~' '~~~~~' "$F" 'text' > "$t/fx/all.md"
   printf '%s\r\n' "$F4" 'git switch main' "$F" 'git push' "$F4" > "$t/fx/crlf.md"
