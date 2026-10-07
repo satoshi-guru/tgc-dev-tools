@@ -17,6 +17,22 @@ Exit:    0 no retired phrase · 1 at least one · 2 usage / nothing could be rea
          the kernel failed or printed no text, no phrase in FILE) - a check that read nothing is never green
 ```
 
+## `branch-after-probe.sh`
+```
+branch-after-probe.sh — which branch does a git command leave checked out, and where would a push go then?
+Usage:   scripts/branch-after-probe.sh 'COMMAND' ['COMMAND' ...]   # a COMMAND is a git command line without the word
+                                                                  # git; several steps are joined with " ; "
+         scripts/branch-after-probe.sh 'switch --track origin/main' 'switch main ; branch -m trunk'
+         scripts/branch-after-probe.sh --selftest                  # 26 commands against the answers written down here
+         scripts/branch-after-probe.sh --help                      # this header
+Output:  one line per COMMAND "branch=B push=P push-head=H exit=N | COMMAND", then the last line
+         "branch-after: commands=N on-main=K"
+           branch     the branch checked out after the COMMAND ("detached" when HEAD is on no branch)
+           push       the remote branch a `git push` without a ref would update ("refused" when git does not push)
+           push-head  the remote branch a `git push origin HEAD` would update ("refused" as above)
+           exit       0, or the exit code of the first step of the COMMAND that failed (the steps behind it still run)
+```
+
 ## `gate.sh`
 ```
 gate.sh — offline gate for tgc-dev-tools (fleet board gate, routing["gates"]).
@@ -81,4 +97,4 @@ Output:  the lines above, then the last line
 Exit:    0 no undeclared drift · 1 drift or a stale declaration · 2 usage / store or root is not a directory
 ```
 
-_6 programs._
+_7 programs._

@@ -29,6 +29,7 @@ tgc-dev-tools/
 │   ├── install-status.sh       # Is a project's .claude in step with this repo? Read-only — see "Installed state"
 │   ├── readme-listing-check.sh # Does this README list every agent, command, skill and script?
 │   ├── link-start-probe.sh     # Does a program answer the same when started through a symlink? — see "Gate"
+│   ├── branch-after-probe.sh   # Which branch does a git command leave checked out? Asks git in a throwaway clone — see "Gate"
 │   ├── skill-drift.sh          # Do the skills here still match ~/.claude/skills? — see "Skills that also exist…"
 │   ├── skill-drift-declared.txt # The deliberate differences skill-drift.sh accepts (one fork, one appendix)
 │   ├── board-prompt-check.sh   # Does a lane's order (board text + role files) still carry a retired sentence? — see "Gate"
@@ -489,6 +490,24 @@ Each of the three starts itself through links in a selftest: the first two in th
 in `scripts/gate.sh --selftest`. `scripts/install-status.sh` gives the same answer since issue #43 (before: exit 2
 on the status call, a red selftest) and starts itself through links in its own `--selftest` as well (cases 9 and
 10, the second one with `--rehearse`).
+
+`scripts/branch-after-probe.sh` asks git itself which branch a command leaves checked out (issue #24). Check 7
+decides that from the words of a command; this program runs the command with the real git in a throwaway clone —
+a fresh bare remote with the branches `main`, `feature`, `maintenance` and `topic/main`, a clone that stands on a
+local branch `work` and has no local `main` — and prints the branch afterwards and where a dry-run push would go,
+once without a ref and once for `HEAD`. The user's git configuration is switched off for it, nothing outside the
+temp directory is touched.
+
+```bash
+scripts/branch-after-probe.sh 'switch --track origin/main' 'branch -M main'   # a command is written without the word git; steps are joined with " ; "
+scripts/branch-after-probe.sh --selftest                                      # 26 commands against the answers written down in the file
+```
+
+One `branch=B push=P push-head=H exit=N | COMMAND` line per command, then `branch-after: commands=N on-main=K`
+(exit 0 whatever it says; exit 2 without a command). It is not a gate check: it measures git, not this repo, and
+the gate has to give the same answer with every git version. Measured with git 2.43.0 on 2026-10-07: `--track`,
+`-t`, `--track=direct` and `--no-track` in front of `origin/main` all create and check out a local `main` (the
+last one was expected to be left alone), and so does a rename of the current branch with `branch -m` / `-M`.
 
 `scripts/skill-drift.sh` is deliberately **not** a gate check (it reads `~/.claude/skills`, which differs per
 machine and changes without a commit here); see "Skills that also exist in `~/.claude/skills`".
