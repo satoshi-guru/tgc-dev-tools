@@ -79,7 +79,7 @@
 #              (long), per line inside a fenced block that starts like a fence line and does not close it (inner) and per block nothing closes
 #              (unclosed). Without FILE: the same files as --push-main
 #          --selftest (its last line: issue #67) proves that the checks fail on 28 broken fixtures and pass on 12 good ones
-#              (+ 29 line cases and 316 block cases for check 7,
+#              (+ 29 line cases and 322 block cases for check 7,
 #              + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #              + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35,
 #                and 4 in a source without agents/, commands/ or skills/ - issue #45, and 3 with one or all of them empty - issue #53,
@@ -389,11 +389,18 @@ FENCE_AWK='
 # and a rule for "any variable followed by push" would be a guess); quotes or a backslash inside the command word
 # (gi"t" push origin main, g\it push origin main - the second form of issue #41, decided there not to be built: a
 # file that writes git this way does not do so by accident, and the check guards against a careless instruction,
-# not against one that is hidden on purpose; a backslash in front of the word, \git push, is seen); a quoted
-# option between git and the subcommand (git "-C" dir push origin main - the word does not start with a dash, so
-# it is taken for the subcommand); a file whose only line ends are bare carriage
-# returns (one line for awk, named in issue #33, not built there); and prose: the check reads commands, not
-# sentences.
+# not against one that is hidden on purpose; a backslash in front of the word, \git push, is seen); an option
+# value with a blank in quotes (git -C "my dir" push origin main - the words are split at blanks before quotes are
+# looked at, so dir" is taken for the subcommand; left open in issue #64); a file whose only line ends are bare
+# carriage returns (one line for awk, named in issue #33, not built there); and prose: the check reads commands,
+# not sentences.
+# Superseded by issue #64, kept as a comment - this stood in "Still not seen" above, before the bare carriage
+# returns:
+#   a quoted option between git and the subcommand (git "-C" dir push origin main - the word does not start with a
+#   dash, so it is taken for the subcommand)
+# Also reported since issue #64: an option between git and the subcommand in one pair of quotes (git "-C" dir push
+# origin main, git '-c' a=b push origin main, git "--git-dir=x" push origin main). The pair is dropped before the
+# word is tested, as the shell drops it; the word behind a quoted -C or -c is its value, as behind the bare one.
 # Still not seen, the four forms of issue #24 that were decided not to be built (2026-10-07), one reason each:
 #   - git clone + cd, git worktree add, cd into another clone: the push then runs in another directory. That is
 #     not a state of this code block, and which branch is checked out there is not in the text
@@ -497,8 +504,19 @@ readme_push_main() {
           c = tok[i]; sub(/["\047]+$/, "", c)
           if (c !~ /(^|[^A-Za-z0-9_.\/-]|\/)git$/) continue
           k = i + 1
-          while (k <= n && tok[k] ~ /^-/) {
-            k += (tok[k] ~ /^(-C|-c|--git-dir|--work-tree|--namespace|--config-env)$/) ? 2 : 1
+          # Superseded by issue #64, kept as a comment - a quoted option ("-C", \047-c\047) does not start with a
+          # dash, so the loop stopped there and the option was taken for the subcommand:
+          #   while (k <= n && tok[k] ~ /^-/) {
+          #     k += (tok[k] ~ /^(-C|-c|--git-dir|--work-tree|--namespace|--config-env)$/) ? 2 : 1
+          #   }
+          # One pair of quotes around the whole word (the same quote in front and behind) is dropped before the
+          # word is tested for the dash and for the options that take a value; the shell drops them too. A word
+          # with one quote only (a value with a blank in quotes, split at the blank) is read as it stands.
+          while (k <= n) {
+            o = tok[k]
+            if (o ~ /^".*"$/ || o ~ /^\047.*\047$/) o = substr(o, 2, length(o) - 2)
+            if (o !~ /^-/) break
+            k += (o ~ /^(-C|-c|--git-dir|--work-tree|--namespace|--config-env)$/) ? 2 : 1
           }
           if (k > n) continue
           cmd = tok[k]; ended = 0
@@ -1404,6 +1422,13 @@ EOF
   push_block '' 'git -C ../x pull origin main' || rc=1
   push_block '' 'git -C main push origin feat/x' || rc=1
   push_block '' 'git -C push pull origin main' || rc=1
+  # issue #64 - the option in one pair of quotes, read as the bare option: 4 reported, 2 left alone
+  push_block 1 'git "-C" dir push origin main' || rc=1
+  push_block 1 "git '-C' dir push origin main" || rc=1
+  push_block 1 "git '-c' a=b push origin main" || rc=1
+  push_block 1 'git "--git-dir=x" push origin main' || rc=1
+  push_block '' 'git "-C" dir push origin feat/x' || rc=1
+  push_block '' 'git "-C" push pull origin main' || rc=1
   # form 3 — --all / --mirror (and --branches, the newer name of --all): 5 reported, 6 left alone
   push_block 1 'git push --all' || rc=1
   push_block 1 'git push origin --mirror' || rc=1
