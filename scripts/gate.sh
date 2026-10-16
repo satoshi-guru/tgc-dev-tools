@@ -401,9 +401,12 @@ FENCE_AWK='
 # Also reported since issue #64: an option between git and the subcommand in one pair of quotes (git "-C" dir push
 # origin main, git '-c' a=b push origin main, git "--git-dir=x" push origin main). The pair is dropped before the
 # word is tested, as the shell drops it; the word behind a quoted -C or -c is its value, as behind the bare one.
-# Still not seen, the four forms of issue #24 that were decided not to be built (2026-10-07), one reason each:
-#   - git clone + cd, git worktree add, cd into another clone: the push then runs in another directory. That is
-#     not a state of this code block, and which branch is checked out there is not in the text
+# Still not seen, the rest of the `git branch -M` row of issue #24 (clone, worktree; git branch -m / -M main from
+# that row is built) and the four forms of issue #24 that were decided not to be built (2026-10-07) - five bullets,
+# one reason each:
+#   - (rest of the git branch -M row) git clone + cd, git worktree add, cd into another clone: the push then runs
+#     in another directory. That is not a state of this code block, and which branch is checked out there is not
+#     in the text
 #   - `git checkout <path>` without "--" (git checkout README.md): a path and a branch cannot be told apart from
 #     the text, so the word is read as a branch and clears the state. `git checkout -- <path>` leaves it
 #   - a switch to main in one code block and the push without a ref in the next: the state ends with the block, as
