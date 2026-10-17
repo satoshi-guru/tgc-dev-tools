@@ -12,6 +12,8 @@
 #          "readme-listing: ok checks=N" or "readme-listing: FAILED gaps=K checks=N"
 # Exit:    0 no gap · 1 gaps (or no README.md) · 2 usage
 set -uo pipefail
+# issue #63: text is tested with `grep <<< "$text" -q PATTERN`, never with `printf '%s\n' "$text" | grep -q` - under
+# pipefail that pipe is false now and then although the text matches (SIGPIPE on printf; PIPEFAIL_GREP_Q in gate.sh)
 
 # real_path FILE — absolute path of FILE with every symlink resolved (issue #35; the function scripts/gate.sh
 # carries since issue #29): a link to the file by readlink (a chain of at most 40 links, relative targets read from
@@ -77,14 +79,14 @@ run_checks() {
     name="$(basename "$f")"
     section="$(basename "$(dirname "$f")")"
     CHECKS=$((CHECKS + 2))
-    printf '%s\n' "$block" | grep -q -F -- "── $name" || gap "MISSING tree: $section/$name"
+    grep <<< "$block" -q -F -- "── $name" || gap "MISSING tree: $section/$name"
     has_heading "$readme" "${name%.md}" || gap "MISSING section: $section/${name%.md}"
   done
   for f in "$root"/skills/*/; do
     [ -d "$f" ] || continue
     name="$(basename "$f")"
     CHECKS=$((CHECKS + 2))
-    printf '%s\n' "$block" | grep -q -F -- "── $name/" || gap "MISSING tree: skills/$name/"
+    grep <<< "$block" -q -F -- "── $name/" || gap "MISSING tree: skills/$name/"
     has_heading "$readme" "$name" || gap "MISSING section: skills/$name"
   done
 
@@ -139,7 +141,7 @@ link_case() {
     echo "selftest FAIL: $what: want '$want' got '$got'"
     return 1
   fi
-  if [ -n "$text" ] && ! printf '%s\n' "$out" | grep -q -x -F -- "$text"; then
+  if [ -n "$text" ] && ! grep <<< "$out" -q -x -F -- "$text"; then
     echo "selftest FAIL: $what: the output lacks the line '$text':"
     printf '%s\n' "$out"
     return 1
@@ -170,20 +172,20 @@ selftest() {
   # 2. drift: skill y exists on disk but the README names only x -> tree + section gap
   write_readme "$t/drift/README.md" x
   out="$(report "$t/drift")" && { echo "selftest FAIL: unlisted skill accepted"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "MISSING tree: skills/y/" || { echo "selftest FAIL: no tree gap for y"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "MISSING section: skills/y" || { echo "selftest FAIL: no section gap for y"; rc=1; }
-  printf '%s\n' "$out" | grep -q "FAILED gaps=2 " || { echo "selftest FAIL: want gaps=2, got: ${out##*$'\n'}"; rc=1; }
+  grep <<< "$out" -q -x "MISSING tree: skills/y/" || { echo "selftest FAIL: no tree gap for y"; rc=1; }
+  grep <<< "$out" -q -x "MISSING section: skills/y" || { echo "selftest FAIL: no section gap for y"; rc=1; }
+  grep <<< "$out" -q "FAILED gaps=2 " || { echo "selftest FAIL: want gaps=2, got: ${out##*$'\n'}"; rc=1; }
 
   # 3. stale: the README lists skill z that is not on disk
   write_readme "$t/stale/README.md" x y z
   out="$(report "$t/stale")" && { echo "selftest FAIL: stale tree entry accepted"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "STALE tree: skills/z/" || { echo "selftest FAIL: no stale line for z"; rc=1; }
+  grep <<< "$out" -q -x "STALE tree: skills/z/" || { echo "selftest FAIL: no stale line for z"; rc=1; }
 
   # 4. program: a second script exists that the README does not name
   write_readme "$t/program/README.md" x y
   printf '#!/usr/bin/env bash\n' > "$t/program/scripts/other.sh"
   out="$(report "$t/program")" && { echo "selftest FAIL: undocumented script accepted"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "MISSING program: scripts/other.sh" || { echo "selftest FAIL: no program gap"; rc=1; }
+  grep <<< "$out" -q -x "MISSING program: scripts/other.sh" || { echo "selftest FAIL: no program gap"; rc=1; }
 
   # 5. no README at all
   out="$(report "$t/none")" && { echo "selftest FAIL: missing README accepted"; rc=1; }

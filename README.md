@@ -31,6 +31,8 @@ tgc-dev-tools/
 │   ├── link-start-probe.sh     # Does a program answer the same when started through a symlink? — see "Gate"
 │   ├── branch-after-probe.sh   # Which branch does a git command leave checked out? Asks git in a throwaway clone — see "Gate"
 │   ├── selftest-last-line-probe.sh # Does a program's --selftest end with a fixed last line, green and red? — see "Gate"
+│   ├── selftest-repeat.sh      # Does a selftest stay green over many runs, alone or side by side? Prints why a red run failed — see "Gate"
+│   ├── pipefail-sigpipe-probe.sh # How often is `printf … | grep -q` false under pipefail although it matches? — see "Gate"
 │   ├── skill-drift.sh          # Do the skills here still match ~/.claude/skills? — see "Skills that also exist…"
 │   ├── skill-drift-declared.txt # The deliberate differences skill-drift.sh accepts (one fork, one appendix)
 │   ├── board-prompt-check.sh   # Does a lane's order (board text + role files) still carry a retired sentence? — see "Gate"
@@ -563,6 +565,28 @@ about its red run. Measured on `scripts/gate.sh` on 2026-10-07 (mawk 1.3.4, `awk
 the red run ended with exit 1, 212 `selftest FAIL:` lines and the line of its last failed case
 (`selftest-last-line: NOT FIXED not_fixed=1 runs=2 red=1`, exit 1); since then with
 `selftest FAILED fail_lines=212` (`selftest-last-line: ok runs=2 red=1`, exit 0).
+
+`scripts/selftest-repeat.sh` starts a selftest many times, alone or several side by side, and prints for every red
+run the lines of its log from the first `selftest FAIL:` on (issue #63). `scripts/pipefail-sigpipe-probe.sh`
+measures the cause it found: under `set -o pipefail`, `printf '%s\n' "$text" | grep -q PATTERN` is false now and
+then although the text matches — bash writes printf's output line by line, grep -q exits at the first match, and the
+next write gets SIGPIPE (exit 141). The gate, `readme-listing-check.sh` and `install-status.sh` test text with a
+here-string since then (`grep <<< "$text" -q PATTERN`), and a selftest case of the gate looks for a pipe into
+`grep -q` in those three files. Neither program is a gate check: they measure timing, and the gate must not depend
+on load.
+
+```bash
+scripts/selftest-repeat.sh --runs 24 --parallel 8        # "red run=I exit=E log=PATH" + its FAIL lines per red run, then "selftest-repeat: runs=N ok=K failed=F parallel=P logs=DIR" (exit 0 all green, 1 a red run)
+scripts/selftest-repeat.sh --cmd 'COMMAND' --runs 5      # any command; a run is green with exit 0 and no "selftest FAIL:" line
+scripts/pipefail-sigpipe-probe.sh --runs 2000 --lines 3  # "pipe: …", "herestring: …", then "pipefail-sigpipe: runs=N lines=L pipe_false=F herestring_false=H" (exit 0)
+scripts/selftest-repeat.sh --selftest                    # 6 cases on stand-in commands
+scripts/pipefail-sigpipe-probe.sh --selftest             # 4 cases
+```
+
+Measured on 2026-10-17 (load average 22–36, other lanes on the machine): before the fix, 24 runs of
+`scripts/gate.sh --selftest`, 8 side by side → 4 red (check 6 twice, check 2 once, one start of the gate file);
+20 runs one after another → 0 red. The probe: a 3-line text, 16 × 3000 runs 8 side by side → the pipe form false 14
+times (all exit 141), the here-string form 0 times; a 20000-line text (more than a pipe buffers) → 100 of 100 false.
 
 `scripts/skill-drift.sh` is deliberately **not** a gate check (it reads `~/.claude/skills`, which differs per
 machine and changes without a commit here); see "Skills that also exist in `~/.claude/skills`".
