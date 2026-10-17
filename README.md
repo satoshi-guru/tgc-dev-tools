@@ -477,6 +477,9 @@ scripts/gate.sh --help                         # the header of the gate file as 
 
 One `FILE:LINE: command` line per report, then the last line `push-main: ok files=N` (exit 0) or
 `push-main: FOUND hits=K files=N` (exit 1). A FILE that is no readable file ends with exit 2 and nothing is read.
+Without a FILE the readout also names every symlink to a directory inside a skill — the rule above rejects it and
+the reader does not go behind it — as one `PATH: symlink to a directory inside a skill, not read` line, and then
+ends with `push-main: FOUND hits=K files=N links=L` (exit 1, also when K is 0), never with a bare ok (issue #73).
 
 The code fences check 7 reads can be counted the same way (issue #66), with the fence rule of the check itself:
 
@@ -494,7 +497,8 @@ shorter run, or text behind the run), `unclosed` a block that nothing closes bef
 closing rule of issue #66 changed no report in this repo. A line that starts with backticks and carries a backtick
 behind them (inline code at the start of a sentence) is no fence line since issue #69 and is counted nowhere; the
 same day, with this section in place, the 19 files had 63 blocks and none of the three kinds before and after that
-change.
+change. `--fences` lists files only: a symlink to a directory inside a skill is neither entered nor named there and
+the exit stays 0; the link rule lives in the gate and in `--push-main` (issue #73).
 
 `scripts/readme-listing-check.sh` can be run on its own. It compares the tree in "What's Inside" and the `###`
 headings with `agents/`, `commands/`, `skills/` on disk, in both directions:

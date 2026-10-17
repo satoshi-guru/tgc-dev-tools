@@ -74,17 +74,20 @@
 #              "fences: files=N blocks=B long=L inner=I unclosed=U" (exit 0, whatever the counts); exit 2 and nothing read when a FILE is no readable file
 #          scripts/gate.sh --help     # this header
 #          --push-main (issue #25) prints above its last line one "FILE:LINE: command" line per reported command. Without FILE: the files
-#              check 7 reads in this repo, README.md and what install.sh installs
+#              check 7 reads in this repo, README.md and what install.sh installs. Since issue #73, without FILE it also prints one
+#              "PATH: symlink to a directory inside a skill, not read" line per such link (the gate rejects it, check 7) and then ends with
+#              "push-main: FOUND hits=K files=N links=L" (exit 1, also when K is 0) - never a bare ok over content it did not read
 #          --fences (issue #66) prints above its last line one "FILE:LINE: kind: text" line per fence that opens with four or more characters
 #              (long), per line inside a fenced block that starts like a fence line and does not close it (inner) and per block nothing closes
-#              (unclosed). Without FILE: the same files as --push-main
+#              (unclosed). Without FILE: the same files as --push-main - files only: a symlink to a directory inside a skill is neither
+#              entered nor named, and the exit stays 0 (a count, no verdict; issue #73 - the link rule lives in the gate and --push-main)
 #          --selftest (its last line: issue #67) proves that the checks fail on 28 broken fixtures and pass on 12 good ones
 #              (+ 29 line cases and 322 block cases for check 7,
 #              + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #              + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35,
 #                and 4 in a source without agents/, commands/ or skills/ - issue #45, and 3 with one or all of them empty - issue #53,
-#              + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
-#              + 9 starts of the gate file with --fences - issue #66, 2 of them since issue #69,
+#              + 9 starts of the gate file with --push-main and 1 with --help - issue #25, 1 of them since issue #73,
+#              + 10 starts of the gate file with --fences - issue #66, 2 of them since issue #69, 1 since issue #73,
 #              + 4 starts of install.sh whose "Done. Installed ..." line is read, 3 of them beside entries it does not copy - issue #54,
 #              + 7 runs of the step that prints the selftest's last line, each over a stand-in for the cases - issue #67)
 #              of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
@@ -739,14 +742,21 @@ skill_dir_links() {
 # list it read only in part.
 # Without a FILE it reads what check 7 reads in the repo this file belongs to: README.md and the files of
 # tool_files, named by their path below the repo root. Nothing to read there is exit 2 as well, not an ok.
+# Since issue #73, without a FILE it also names every symlink to a directory inside a skill (skill_dir_links), one
+# line "PATH: symlink to a directory inside a skill, not read" each above the last line: the reader does not go
+# behind such a link and the gate rejects it (check 7, issue #51), so a readout that ends with a bare ok over that
+# tree would be an ok about installed content it did not read. With one or more such links the last line is
+# "push-main: FOUND hits=K files=N links=L" and the exit is 1, also when K is 0. Without a link the last line keeps
+# its form (no links= field). With a FILE nothing changes: the FILEs are what is read, no skill is walked.
 push_main_readout() {
-  local f out root="" strip="" hits=0 files=0
-  local -a paths=()
+  local f out root="" strip="" hits=0 files=0 links=0
+  local -a paths=() dirlinks=()
   if [ "$#" -eq 0 ]; then
     root="$(cd -P "$(dirname "$SELF")/.." && pwd)" || { echo "gate.sh: --push-main: cannot resolve the repo root" >&2; return 2; }
     strip="$root/"
     [ -f "$root/README.md" ] && paths+=("$root/README.md")
     while IFS= read -r -d '' f; do paths+=("$f"); done < <(tool_files "$root")
+    while IFS= read -r -d '' f; do dirlinks+=("$f"); done < <(skill_dir_links "$root")
     [ "${#paths[@]}" -gt 0 ] || { echo "gate.sh: --push-main: no README.md and no installed file in $root" >&2; return 2; }
   else
     paths=("$@")
@@ -765,6 +775,14 @@ push_main_readout() {
       hits=$((hits + 1))
     done < <(readme_push_main "$f")
   done
+  for f in "${dirlinks[@]}"; do
+    printf '%s: symlink to a directory inside a skill, not read\n' "${f#"$strip"}"
+    links=$((links + 1))
+  done
+  if [ "$links" -gt 0 ]; then
+    echo "push-main: FOUND hits=$hits files=$files links=$links"
+    return 1
+  fi
   if [ "$hits" -eq 0 ]; then
     echo "push-main: ok files=$files"
     return 0
@@ -816,6 +834,9 @@ fence_lines() {
 # tool_files, named by their path below the repo root. Nothing to read there is exit 2 as well.
 # What it is for: before the fence rule changes, inner=0 over the files check 7 reads shows that the change moves
 # no block there (the measurement issue #66 asks for first).
+# Issue #73, decided as option 3 of the issue: without a FILE this readout lists files only. A symlink to a
+# directory inside a skill is neither entered nor named here, and the exit stays 0 - it counts fences and gives no
+# verdict. The rule for such a link lives in the gate (check 7, issue #51) and in --push-main, which names each one.
 fence_readout() {
   local f out root="" strip="" files=0 blocks=0 long=0 inner=0 unclosed=0 b l i u
   local -a paths=()
@@ -2122,7 +2143,7 @@ FAIL: skills/x/shared -> ../../shared: $why51" '#51' || rc=1
   #                reported) and in skills/x/evals/e.md (not installed, so it is not read and not counted)
   # 8 starts with --push-main: 3 with files that can be read (one with a report, one without, three files in one
   # start), 3 with a FILE that is none (missing, missing next to one with a report, a directory), 2 without a FILE
-  # (pmrepo, pmrepobad). Then 1 start with --help: exit 0, the header from its first line on, the option named in it.
+  # (pmrepo, pmrepobad); a 9th without a FILE since issue #73 (pmrepolink, below). Then 1 start with --help: exit 0, the header from its first line on, the option named in it.
   local helpout
   mkdir -p "$t/pm/sub"
   printf '# f\n\ngit push origin main\n' > "$t/pm/hit.md"
@@ -2147,6 +2168,17 @@ FAIL: skills/x/shared -> ../../shared: $why51" '#51' || rc=1
   push_main_case "no FILE, a repo without a push to main" "$t/pm/sub" "$t/pmrepo/scripts/gate.sh" 0 'push-main: ok files=4' || rc=1
   push_main_case "no FILE, a repo with one in an installed skill file and one in evals/" "$t/pm/sub" "$t/pmrepobad/scripts/gate.sh" 1 \
     $'skills/x/references/flow.md:3: git push origin main\npush-main: FOUND hits=1 files=5' || rc=1
+  # 1 more start with --push-main (issue #73), 9 in all: pmrepolink is pmrepo plus skills/x/shared, a symlink to a
+  # directory outside the skill whose flow.md carries a push to main. The gate rejects that link (check 7, issue
+  # #51); the readout without a FILE does not read behind it either, so it names the link and does not end with a
+  # bare ok: exit 1, hits=0, the same 4 files as pmrepo, links=1. Before issue #73 this start ended with
+  # "push-main: ok files=4" and exit 0 (measured on the fixture, see the PR of issue #73).
+  cp -r "$t/pmrepo" "$t/pmrepolink"
+  mkdir -p "$t/pmrepolink/shared"
+  printf '# flow\n\n```bash\ngit push origin main\n```\n' > "$t/pmrepolink/shared/flow.md"
+  ln -s "$t/pmrepolink/shared" "$t/pmrepolink/skills/x/shared"
+  push_main_case "no FILE, a repo with a symlink to a directory inside a skill" "$t/pm/sub" "$t/pmrepolink/scripts/gate.sh" 1 \
+    $'skills/x/shared: symlink to a directory inside a skill, not read\npush-main: FOUND hits=0 files=4 links=1' || rc=1
   helpout="$(cd "$t/pm/sub" && bash "$SELF" --help 2>&1)" || { echo "selftest FAIL: --help does not end with exit 0"; rc=1; }
   [ "${helpout%%$'\n'*}" = "gate.sh — offline gate for tgc-dev-tools (fleet board gate, routing[\"gates\"])." ] || {
     echo "selftest FAIL: --help does not start with the first line of the header, but with: ${helpout%%$'\n'*}"; rc=1; }
@@ -2203,6 +2235,11 @@ FAIL: skills/x/shared -> ../../shared: $why51" '#51' || rc=1
     'fences: files=1 blocks=0 long=0 inner=0 unclosed=0' inline.md || rc=1
   fences_case "8 lines, backtick runs with a backtick behind them outside and inside a block" "$t/fx" "$SELF" 0 \
     "mixed.md:8: unclosed: ${F}bash"$'\n'"fences: files=1 blocks=3 long=0 inner=0 unclosed=1" mixed.md || rc=1
+  # 1 more start with --fences (issue #73, option 3 of the issue), 10 in all: pmrepolink without a FILE. The readout
+  # lists files only - the link is not entered and not named, the exit stays 0 - so its output is the one of pmrepo,
+  # and the block of shared/flow.md behind the link is not counted. The link rule is the gate's and --push-main's.
+  fences_case "no FILE, a repo with a symlink to a directory inside a skill (files only)" "$t/pm/sub" "$t/pmrepolink/scripts/gate.sh" 0 \
+    'fences: files=4 blocks=1 long=0 inner=0 unclosed=0' || rc=1
   printf '%s\n' "$helpout" | grep -q -F -- 'scripts/gate.sh --fences [FILE ...]' || { echo "selftest FAIL: --help does not name --fences [FILE ...]"; rc=1; }
   # link cases (issue #29): the gate file itself, started with bash in an empty directory, directly and through
   # symlinks - the last line and the exit code are those of the repo the file belongs to, never of the directory
