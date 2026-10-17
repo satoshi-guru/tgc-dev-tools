@@ -19,6 +19,8 @@
 #          "install-status: in step same=S extra=E" or "install-status: BEHIND missing=M differs=D same=S extra=E"
 # Exit:    0 in step · 1 behind (or the rehearsed install failed) · 2 usage / destination is not a directory
 set -uo pipefail
+# issue #63: text is tested with `grep <<< "$text" -q PATTERN`, never with `printf '%s\n' "$text" | grep -q` - under
+# pipefail that pipe is false now and then although the text matches (SIGPIPE on printf; PIPEFAIL_GREP_Q in gate.sh)
 
 # real_path FILE — absolute path of FILE with every symlink resolved (issue #35; the function scripts/gate.sh
 # carries since issue #29): a link to the file by readlink (a chain of at most 40 links, relative targets read from
@@ -182,7 +184,7 @@ link_case() {
     echo "selftest FAIL: $what: want '$want' got '$got'"
     return 1
   fi
-  if [ -n "$text" ] && ! printf '%s\n' "$out" | grep -q -x -F -- "$text"; then
+  if [ -n "$text" ] && ! grep <<< "$out" -q -x -F -- "$text"; then
     echo "selftest FAIL: $what: the output lacks the line '$text':"
     printf '%s\n' "$out"
     return 1
@@ -218,10 +220,10 @@ selftest() {
   printf 'older x\n' > "$t/part/skills/x/SKILL.md"
   out="$(status "$t/src" "$t/part")" && { echo "selftest FAIL: partial destination accepted"; rc=1; }
   [ "${out##*$'\n'}" = "install-status: BEHIND missing=2 differs=1 same=1 extra=0" ] || { echo "selftest FAIL: partial, got: ${out##*$'\n'}"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "MISSING  commands/c.md" || { echo "selftest FAIL: no MISSING line for c.md"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "DIFFERS  skills/x/" || { echo "selftest FAIL: no DIFFERS line for x"; rc=1; }
-  printf '%s\n' "$out" | grep -q "^    differs: SKILL.md (here: last commit not in git · there: modified " || { echo "selftest FAIL: no differs detail"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "    missing file: refs/r.md" || { echo "selftest FAIL: no missing-file detail"; rc=1; }
+  grep <<< "$out" -q -x "MISSING  commands/c.md" || { echo "selftest FAIL: no MISSING line for c.md"; rc=1; }
+  grep <<< "$out" -q -x "DIFFERS  skills/x/" || { echo "selftest FAIL: no DIFFERS line for x"; rc=1; }
+  grep <<< "$out" -q "^    differs: SKILL.md (here: last commit not in git · there: modified " || { echo "selftest FAIL: no differs detail"; rc=1; }
+  grep <<< "$out" -q -x "    missing file: refs/r.md" || { echo "selftest FAIL: no missing-file detail"; rc=1; }
 
   # 4. extras: foreign agent, a command named like a skill here, a foreign skill, a file only there, an evals/ there
   cp -r "$t/fresh" "$t/extra"
@@ -233,17 +235,17 @@ selftest() {
   printf 'e\n' > "$t/extra/skills/x/evals/own.json"
   out="$(status "$t/src" "$t/extra")" || { echo "selftest FAIL: extras counted as behind"; rc=1; }
   [ "${out##*$'\n'}" = "install-status: in step same=4 extra=3" ] || { echo "selftest FAIL: extras, got: ${out##*$'\n'}"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "EXTRA    commands/y.md (this repo has a skill of that name: skills/y/)" || { echo "selftest FAIL: no same-name hint"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "    only there: notes.md (install.sh keeps it)" || { echo "selftest FAIL: no only-there line"; rc=1; }
+  grep <<< "$out" -q -x "EXTRA    commands/y.md (this repo has a skill of that name: skills/y/)" || { echo "selftest FAIL: no same-name hint"; rc=1; }
+  grep <<< "$out" -q -x "    only there: notes.md (install.sh keeps it)" || { echo "selftest FAIL: no only-there line"; rc=1; }
   # Superseded (the WARN line became a NOTE, see the two assertions below); the older assertion of this branch,
   # kept as a comment when main was merged in:
   #   printf '%s\n' "$out" | grep -q "^WARN     skills/x/evals/ exists there" || { echo "selftest FAIL: no evals warning"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "NOTE     skills/x/evals/ exists there - install.sh leaves that folder as it was" || { echo "selftest FAIL: no evals note"; rc=1; }
-  printf '%s\n' "$out" | grep -q "would remove that folder" && { echo "selftest FAIL: the report still says install.sh would remove evals/"; rc=1; }
+  grep <<< "$out" -q -x "NOTE     skills/x/evals/ exists there - install.sh leaves that folder as it was" || { echo "selftest FAIL: no evals note"; rc=1; }
+  grep <<< "$out" -q "would remove that folder" && { echo "selftest FAIL: the report still says install.sh would remove evals/"; rc=1; }
 
   # 5. rehearsal of the partial destination: behind before, in step after, and the destination itself unchanged
   out="$(rehearse "$t/src" "$t/part")" || { echo "selftest FAIL: rehearsal did not end in step"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "install-status: BEHIND missing=2 differs=1 same=1 extra=0" || { echo "selftest FAIL: rehearsal has no before line"; rc=1; }
+  grep <<< "$out" -q -x "install-status: BEHIND missing=2 differs=1 same=1 extra=0" || { echo "selftest FAIL: rehearsal has no before line"; rc=1; }
   [ "${out##*$'\n'}" = "install-status: in step same=4 extra=0" ] || { echo "selftest FAIL: rehearsal after, got: ${out##*$'\n'}"; rc=1; }
   [ ! -e "$t/part/commands" ] && [ ! -e "$t/part/skills/y" ] && [ "$(cat "$t/part/skills/x/SKILL.md")" = "older x" ] \
     || { echo "selftest FAIL: rehearsal wrote into the destination"; rc=1; }
@@ -271,7 +273,7 @@ selftest() {
   [ -f "$t/extra/skills/x/notes.md" ] || { echo "selftest FAIL: install.sh did not keep a file that is only there"; rc=1; }
   out="$(status "$t/src" "$t/extra")" || { echo "selftest FAIL: extras destination behind after an install"; rc=1; }
   [ "${out##*$'\n'}" = "install-status: in step same=4 extra=3" ] || { echo "selftest FAIL: extras after install, got: ${out##*$'\n'}"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "NOTE     skills/x/evals/ exists there - install.sh leaves that folder as it was" || { echo "selftest FAIL: no evals note after the install"; rc=1; }
+  grep <<< "$out" -q -x "NOTE     skills/x/evals/ exists there - install.sh leaves that folder as it was" || { echo "selftest FAIL: no evals note after the install"; rc=1; }
 
   # 9. started through symlinks (issue #43): the program file itself, started with bash and without --source in an
   #    empty directory, directly and through links - the tools compared are those of the repo the file belongs to,

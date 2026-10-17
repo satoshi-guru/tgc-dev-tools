@@ -72,6 +72,18 @@ Output:  one line per start "<how>: exit=N last=<last output line>", then the la
 Exit:    0 every start gives the direct result · 1 at least one differs · 2 usage / PROGRAM is not a file
 ```
 
+## `pipefail-sigpipe-probe.sh`
+```
+pipefail-sigpipe-probe.sh — how often is `printf '%s\n' "$text" | grep -q PATTERN` false under pipefail, when it matches?
+Usage:   scripts/pipefail-sigpipe-probe.sh [--runs N] [--lines L]   # defaults: 2000 runs, 3 lines
+         scripts/pipefail-sigpipe-probe.sh --selftest               # 4 cases
+         scripts/pipefail-sigpipe-probe.sh --help                   # this header
+Output:  "pipe: runs=N false=F codes=C" and "herestring: runs=N false=F codes=C" (C = the exit codes of the false
+         runs with their counts, "-" when there was none), then the last line
+         "pipefail-sigpipe: runs=N lines=L pipe_false=F herestring_false=H"
+Exit:    0 the readout was made, whatever it says · 1 the selftest found a difference · 2 usage
+```
+
 ## `readme-listing-check.sh`
 ```
 readme-listing-check.sh — does README.md list every tool this repo installs (and nothing that is gone)?
@@ -97,6 +109,20 @@ Exit:    0 both runs fixed, at least one of them red · 1 at least one run not f
          2 usage / PROGRAM is not a file / CMD is not one of the seven
 ```
 
+## `selftest-repeat.sh`
+```
+selftest-repeat.sh — does a selftest stay green when it runs many times, alone or beside copies of itself?
+Usage:   scripts/selftest-repeat.sh [--runs N] [--parallel P] [--cmd 'COMMAND']   # defaults: 10 runs, 1 at a time
+         scripts/selftest-repeat.sh --runs 20 --parallel 4                          # four selftests side by side
+         scripts/selftest-repeat.sh --selftest                                      # 6 cases on stand-in commands
+         scripts/selftest-repeat.sh --help                                          # this header
+Output:  one block per red run "red run=I exit=E log=PATH" plus its lines from the first "selftest FAIL:" on
+         (indented), then the last line "selftest-repeat: runs=N ok=K failed=F parallel=P logs=DIR".
+         COMMAND runs under bash -c with SELFTEST_REPEAT_RUN=I (1..N) in its environment.
+         A run is green when it ends with exit 0 and its log holds no line starting with "selftest FAIL:".
+Exit:    0 every run green · 1 at least one red run · 2 usage
+```
+
 ## `skill-drift.sh`
 ```
 skill-drift.sh — do the skills of this repo still match the copies of the same name in a skill store? Read-only.
@@ -112,4 +138,4 @@ Output:  the lines above, then the last line
 Exit:    0 no undeclared drift · 1 drift or a stale declaration · 2 usage / store or root is not a directory
 ```
 
-_8 programs._
+_10 programs._

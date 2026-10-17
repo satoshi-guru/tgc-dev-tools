@@ -86,7 +86,9 @@
 #              + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
 #              + 9 starts of the gate file with --fences - issue #66, 2 of them since issue #69,
 #              + 4 starts of install.sh whose "Done. Installed ..." line is read, 3 of them beside entries it does not copy - issue #54,
-#              + 7 runs of the step that prints the selftest's last line, each over a stand-in for the cases - issue #67)
+#              + 7 runs of the step that prints the selftest's last line, each over a stand-in for the cases - issue #67,
+#              + 1 run of accept_case on the broken fixture, whose FAIL lines it must print, and 1 read of the gate's three
+#                programs for a pipe into grep -q - issue #63)
 #              of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 set -uo pipefail
 
@@ -125,6 +127,17 @@ FAILS=0
 
 fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
 
+# PIPEFAIL_GREP_Q (issue #63) — why this file tests text with `grep <<< "$text" -q PATTERN` and never with
+# `printf '%s\n' "$text" | grep -q PATTERN`. Under set -o pipefail the pipe is false when any side is. Bash writes
+# its printf builtin line by line (measured with strace: one write per line), and grep -q exits at the first match,
+# so when grep matches an early line and exits between two writes, the next write gets SIGPIPE, printf ends with
+# 141 and the test is false although the text holds the pattern. Measured with scripts/pipefail-sigpipe-probe.sh
+# on 2026-10-17: a 3-line text, 16 probes of 3000 runs 8 at a time at load ~23 -> the pipe form false 14 times in
+# 48000 (all exit 141), the here-string form 0 times; a 20000-line text (more than the 64 KiB a pipe buffers) ->
+# 100 of 100 false. It is what made `scripts/gate.sh --selftest` red now and then: check 2 (frontmatter_ok) and check
+# 6 (readme-listing-check.sh, same pattern) rejected good fixtures, and assertions over $out missed lines that were
+# there - 4 of 24 runs red, 8 side by side. A here-string is one process and no pipe. A redirection may stand
+# anywhere in a simple command, so `grep <<< "$out" -q -x LINE` keeps the options where they stood.
 # frontmatter_ok FILE "key key" — file starts with --- and the block holds every key
 frontmatter_ok() {
   local file="$1" key block
@@ -132,7 +145,8 @@ frontmatter_ok() {
   [ "$(head -n1 "$file")" = "---" ] || return 1
   block="$(awk 'NR==1{next} /^---$/{exit} {print}' "$file")"
   for key in $2; do
-    printf '%s\n' "$block" | grep -q "^${key}:" || return 1
+    # issue #63: a here-string, not `printf '%s\n' "$block" | grep -q` - see PIPEFAIL_GREP_Q above this function
+    grep <<< "$block" -q "^${key}:" || return 1
   done
   return 0
 }
@@ -930,7 +944,9 @@ run_checks() {
     fi
     rm -rf "$tmp"
     # a non-comment "${1:-something}" is a default destination: a bare ./install.sh would write somewhere unasked
-    if grep -v '^[[:space:]]*#' "$root/install.sh" | grep -q -E '\$\{1:-[^}]'; then
+    # issue #63: the second grep reads all its input (no -q), so the first one never writes into a closed pipe
+    #   if grep -v '^[[:space:]]*#' "$root/install.sh" | grep -q -E '\$\{1:-[^}]'; then
+    if grep -v '^[[:space:]]*#' "$root/install.sh" | grep -E '\$\{1:-[^}]' >/dev/null; then
       fail "install.sh has a default destination (issue #4: the destination must be given)"
     fi
   fi
@@ -1032,7 +1048,7 @@ link_case() {
     echo "selftest FAIL: $1: want '$4' got '$got'"
     return 1
   fi
-  if [ -n "${5:-}" ] && ! printf '%s\n' "$out" | grep -q -F -- "$5"; then
+  if [ -n "${5:-}" ] && ! grep <<< "$out" -q -F -- "$5"; then
     echo "selftest FAIL: $1: the output lacks '$5':"
     printf '%s\n' "$out"
     return 1
@@ -1140,7 +1156,7 @@ install_empty_case() {
   out="$(cd "$2" && bash "$3/install.sh" "$4" 2>&1)"
   code=$?
   [ "$code" -eq 0 ] || why="$why"$'\n'"    exit $code, want 0"
-  if printf '%s\n' "$out" | grep -q '^cp: '; then
+  if grep <<< "$out" -q '^cp: '; then
     why="$why"$'\n'"    cp reported an error: $(printf '%s\n' "$out" | grep -m1 '^cp: ')"
   fi
   star="$(find "$4" -name '\*' 2>/dev/null | LC_ALL=C sort)"
@@ -1256,6 +1272,19 @@ last_line_case() {
   return 0
 }
 
+# accept_case WHAT ROOT — selftest helper (issue #63): run_checks must accept the fixture ROOT. When it does not, it
+# prints "selftest FAIL: WHAT rejected:" and below it the whole output of run_checks, each line behind "    | ", so
+# the check that rejected the fixture is named in the log; returns 1. Before issue #63 these cases sent that output
+# to /dev/null: the listed fixture was rejected once in 20 runs on the same file content, and the run did not say
+# by which check. run_checks runs in a subshell here; no caller reads FAILS after an acceptance case.
+accept_case() {
+  local out
+  out="$(run_checks "$2" 2>&1)" && return 0
+  echo "selftest FAIL: $1 rejected:"
+  printf '%s\n' "$out" | sed 's/^/    | /'
+  return 1
+}
+
 selftest() {
   local t rc=0
   t="$(mktemp -d)"
@@ -1275,8 +1304,8 @@ selftest() {
   cp -r "$t/good" "$t/noreadme"
   fixture_readme "$t/good/README.md"
   out0="$(run_checks "$t/empty" 2>&1)" && { echo "selftest FAIL: empty directory accepted (issue #29)"; rc=1; }
-  printf '%s\n' "$out0" | grep -q 'FAIL: not a checkout of this repo: no install.sh in ' || { echo "selftest FAIL: empty directory not rejected for the missing install.sh"; rc=1; }
-  printf '%s\n' "$out0" | grep -q 'FAIL: not a checkout of this repo: no README.md in ' || { echo "selftest FAIL: empty directory not rejected for the missing README.md"; rc=1; }
+  grep <<< "$out0" -q 'FAIL: not a checkout of this repo: no install.sh in ' || { echo "selftest FAIL: empty directory not rejected for the missing install.sh"; rc=1; }
+  grep <<< "$out0" -q 'FAIL: not a checkout of this repo: no README.md in ' || { echo "selftest FAIL: empty directory not rejected for the missing README.md"; rc=1; }
   out0="$(run_checks "$t/noinstall" 2>&1)" && { echo "selftest FAIL: root without install.sh accepted (issue #29)"; rc=1; }
   [ "$out0" = "FAIL: not a checkout of this repo: no install.sh in $t/noinstall" ] || { echo "selftest FAIL: root without install.sh, want exactly the line for install.sh, got: $out0"; rc=1; }
   out0="$(run_checks "$t/noreadme" 2>&1)" && { echo "selftest FAIL: root without README.md accepted (issue #29)"; rc=1; }
@@ -1285,11 +1314,25 @@ selftest() {
   printf 'no frontmatter\n' > "$t/bad/agents/a.md"
   printf 'echo "unterminated\n' > "$t/bad/install.sh"
   fixture_readme "$t/bad/README.md"
-  run_checks "$t/good" >/dev/null || { echo "selftest FAIL: good fixture rejected"; rc=1; }
+  # issue #63: the acceptance cases go through accept_case, which prints the output of a rejection
+  #   run_checks "$t/good" >/dev/null || { echo "selftest FAIL: good fixture rejected"; rc=1; }
+  accept_case "good fixture" "$t/good" || rc=1
   run_checks "$t/bad" >/dev/null && { echo "selftest FAIL: bad fixture accepted"; rc=1; }
+  # acceptbad (issue #63): accept_case on the bad fixture must return 1, name the case and print the FAIL lines of
+  # the checks that rejected it, indented - the proof that a rejected good fixture would say why
+  out0="$(accept_case "bad fixture (acceptbad)" "$t/bad")" && { echo "selftest FAIL: accept_case returned 0 on the bad fixture"; rc=1; }
+  grep <<< "$out0" -q -x 'selftest FAIL: bad fixture (acceptbad) rejected:' || { echo "selftest FAIL: accept_case did not name the rejected case"; rc=1; }
+  grep <<< "$out0" -q -x '    | FAIL: bash -n install.sh' || { echo "selftest FAIL: accept_case did not print the FAIL line of check 1"; rc=1; }
+  grep <<< "$out0" -q -x '    | FAIL: frontmatter name/description: agents/a.md' || { echo "selftest FAIL: accept_case did not print the FAIL line of check 2"; rc=1; }
+  # nopipeq (issue #63): no line of the three programs the gate runs (this file, readme-listing-check.sh,
+  # install-status.sh) pipes into grep -q outside a comment - under pipefail such a test is false now and then
+  # although the text matches (PIPEFAIL_GREP_Q above frontmatter_ok). Each line found is printed.
+  local pq
+  pq="$(grep -n -E '\|[[:space:]]*grep -q' "$SELF" "$(dirname "$SELF")/readme-listing-check.sh" "$(dirname "$SELF")/install-status.sh" | grep -v -E '^[^:]*:[0-9]+:[[:space:]]*#')"
+  [ -z "$pq" ] || { echo "selftest FAIL: a pipe into grep -q under pipefail (issue #63):"; printf '%s\n' "$pq" | sed 's/^/    | /'; rc=1; }
   out0="$(run_checks "$t/bad" 2>&1)"
-  printf '%s\n' "$out0" | grep -q -x 'FAIL: bash -n install.sh' || { echo "selftest FAIL: bad fixture not rejected by check 1 (bash -n install.sh)"; rc=1; }
-  printf '%s\n' "$out0" | grep -q -x 'FAIL: frontmatter name/description: agents/a.md' || { echo "selftest FAIL: bad fixture not rejected by check 2 (frontmatter of agents/a.md)"; rc=1; }
+  grep <<< "$out0" -q -x 'FAIL: bash -n install.sh' || { echo "selftest FAIL: bad fixture not rejected by check 1 (bash -n install.sh)"; rc=1; }
+  grep <<< "$out0" -q -x 'FAIL: frontmatter name/description: agents/a.md' || { echo "selftest FAIL: bad fixture not rejected by check 2 (frontmatter of agents/a.md)"; rc=1; }
   # default: good fixture whose install.sh carries a default destination again -> rejected (check 5)
   cp -r "$t/good" "$t/default"
   printf 'DEST="${1:-/nonexistent/.claude}"\n' >> "$t/default/install.sh"
@@ -1302,8 +1345,8 @@ selftest() {
   cp -r "$t/good" "$t/tamper"
   printf 'printf "altered\\n" >> "$DEST/agents/a.md"\n' >> "$t/tamper/install.sh"
   out0="$(run_checks "$t/tamper" 2>&1)" && { echo "selftest FAIL: altered install accepted"; rc=1; }
-  printf '%s\n' "$out0" | grep -q -x 'FAIL: fresh install is not in step with the source (scripts/install-status.sh)' || { echo "selftest FAIL: tamper not rejected for the altered file"; rc=1; }
-  printf '%s\n' "$out0" | grep -q -x 'DIFFERS  agents/a.md' || { echo "selftest FAIL: tamper output does not name the altered file"; rc=1; }
+  grep <<< "$out0" -q -x 'FAIL: fresh install is not in step with the source (scripts/install-status.sh)' || { echo "selftest FAIL: tamper not rejected for the altered file"; rc=1; }
+  grep <<< "$out0" -q -x 'DIFFERS  agents/a.md' || { echo "selftest FAIL: tamper output does not name the altered file"; rc=1; }
   # withevals: good fixture whose skill carries evals/ and a hidden entry -> accepted; a fresh install of it has
   # the hidden entry and no evals/ (check 4, issue #8)
   local out
@@ -1311,7 +1354,8 @@ selftest() {
   mkdir -p "$t/withevals/skills/x/evals"
   printf '{}\n' > "$t/withevals/skills/x/evals/evals.json"
   printf 'keep\n' > "$t/withevals/skills/x/.keep"
-  run_checks "$t/withevals" >/dev/null || { echo "selftest FAIL: fixture with evals/ and a hidden entry rejected"; rc=1; }
+  #   run_checks "$t/withevals" >/dev/null || { echo "selftest FAIL: fixture with evals/ and a hidden entry rejected"; rc=1; }
+  accept_case "fixture with evals/ and a hidden entry" "$t/withevals" || rc=1
   bash "$t/withevals/install.sh" "$t/withevals-dest" >/dev/null 2>&1
   [ -f "$t/withevals-dest/skills/x/.keep" ] || { echo "selftest FAIL: hidden entry of a skill not installed"; rc=1; }
   [ ! -e "$t/withevals-dest/skills/x/evals" ] || { echo "selftest FAIL: evals/ of a skill installed"; rc=1; }
@@ -1321,21 +1365,22 @@ selftest() {
   cp -r "$t/withevals" "$t/evalsrm"
   fixture_installer "$t/evalsrm/install.sh" 'cp -r "$d." "$o/"; rm -rf "$o/evals"'
   out="$(run_checks "$t/evalsrm" 2>&1)" && { echo "selftest FAIL: installer that removes the destination's evals/ accepted"; rc=1; }
-  printf '%s\n' "$out" | grep -q 'removed an evals/ folder the destination already had (issue #8)' || { echo "selftest FAIL: evalsrm not rejected for the removed evals/"; rc=1; }
+  grep <<< "$out" -q 'removed an evals/ folder the destination already had (issue #8)' || { echo "selftest FAIL: evalsrm not rejected for the removed evals/"; rc=1; }
   cp -r "$t/withevals" "$t/evalscopied"
   fixture_installer "$t/evalscopied/install.sh" 'cp -r "$d." "$o/"'
   out="$(run_checks "$t/evalscopied" 2>&1)" && { echo "selftest FAIL: installer that installs evals/ accepted"; rc=1; }
-  printf '%s\n' "$out" | grep -q "installed a skill's evals/ folder" || { echo "selftest FAIL: evalscopied not rejected for the installed evals/"; rc=1; }
+  grep <<< "$out" -q "installed a skill's evals/ folder" || { echo "selftest FAIL: evalscopied not rejected for the installed evals/"; rc=1; }
   cp -r "$t/withevals" "$t/nohidden"
   fixture_installer "$t/nohidden/install.sh" 'for e in "$d"*; do [ "$(basename "$e")" = evals ] || cp -r "$e" "$o/"; done'
   out="$(run_checks "$t/nohidden" 2>&1)" && { echo "selftest FAIL: installer that drops hidden entries accepted"; rc=1; }
-  printf '%s\n' "$out" | grep -q 'did not copy every entry of every skill' || { echo "selftest FAIL: nohidden not rejected for the missing hidden entry"; rc=1; }
+  grep <<< "$out" -q 'did not copy every entry of every skill' || { echo "selftest FAIL: nohidden not rejected for the missing hidden entry"; rc=1; }
   # listed / drift: good fixture with a README that names everything -> accepted, one that names nothing -> rejected (check 6)
   # (since issue #29 the good fixture carries that README already - check 0 wants one; it is written again here so
   # that this case does not depend on it)
   cp -r "$t/good" "$t/listed"
   fixture_readme "$t/listed/README.md"
-  run_checks "$t/listed" >/dev/null || { echo "selftest FAIL: listed fixture rejected"; rc=1; }
+  #   run_checks "$t/listed" >/dev/null || { echo "selftest FAIL: listed fixture rejected"; rc=1; }
+  accept_case "listed fixture" "$t/listed" || rc=1
   cp -r "$t/good" "$t/drift"
   printf '# f\n\nnothing listed, install.sh\n' > "$t/drift/README.md"
   run_checks "$t/drift" >/dev/null && { echo "selftest FAIL: README drift accepted"; rc=1; }
@@ -1358,7 +1403,8 @@ selftest() {
   esac
   cp -r "$t/listed" "$t/pushbranch"
   printf '\nThe change reaches `main` through a pull request, never by a push to `main`:\n\n```bash\ngit push -u origin feat/x\n```\n' >> "$t/pushbranch/README.md"
-  run_checks "$t/pushbranch" >/dev/null || { echo "selftest FAIL: README with 'git push -u origin feat/x' rejected"; rc=1; }
+  #   run_checks "$t/pushbranch" >/dev/null || { echo "selftest FAIL: README with 'git push -u origin feat/x' rejected"; rc=1; }
+  accept_case "README with 'git push -u origin feat/x'" "$t/pushbranch" || rc=1
   # line cases for check 7, straight at readme_push_main: 14 lines it must report, 15 it must leave alone. Since
   # issue #30 each list has one line that calls git by its path, one with the ref in single quotes and one that ends
   # in a carriage return (a file saved with CRLF line endings). A here-document line cannot carry a carriage return,
@@ -1913,7 +1959,8 @@ EOF
   esac
   cp -r "$t/listed" "$t/pushflow"
   printf '\n```bash\ngit switch main && git pull --ff-only origin main\n./install.sh /tmp/x/.claude\n```\n' >> "$t/pushflow/README.md"
-  run_checks "$t/pushflow" >/dev/null || { echo "selftest FAIL: README with 'git switch main && git pull' + install rejected"; rc=1; }
+  #   run_checks "$t/pushflow" >/dev/null || { echo "selftest FAIL: README with 'git switch main && git pull' + install rejected"; rc=1; }
+  accept_case "README with 'git switch main && git pull' + install" "$t/pushflow" || rc=1
   # pushcrlf / pushcrlfbranch (issue #30): the listed README with CRLF line endings on every line, plus a push block
   # (block at line 20, command at 21). Before issue #30 the last word of the command was "main" + carriage return and
   # the whole file passed check 7. The FAIL line names line 21 and carries no carriage return; the same file with a
@@ -1985,7 +2032,7 @@ EOF
     printf 'marker\n' > "$t/decoy/docs/gate-cwd-case/marker.md"
     out="$(cd "$t/decoy" && run_checks "$t/cwdagentbad" 2>&1)" && {
       echo "selftest FAIL: agent file whose named path is missing below the checked root accepted when started in a directory that has it"; rc=1; }
-    printf '%s\n' "$out" | grep -q 'FAIL: agent-file-check on .claude/agents' || {
+    grep <<< "$out" -q 'FAIL: agent-file-check on .claude/agents' || {
       echo "selftest FAIL: cwdagentbad not rejected by check 3"; rc=1; }
   else
     echo "selftest note: the check 3 cases cwdagent and cwdagentbad skipped (no store program agent-file-check.py)"
@@ -2150,7 +2197,7 @@ FAIL: skills/x/shared -> ../../shared: $why51" '#51' || rc=1
   helpout="$(cd "$t/pm/sub" && bash "$SELF" --help 2>&1)" || { echo "selftest FAIL: --help does not end with exit 0"; rc=1; }
   [ "${helpout%%$'\n'*}" = "gate.sh — offline gate for tgc-dev-tools (fleet board gate, routing[\"gates\"])." ] || {
     echo "selftest FAIL: --help does not start with the first line of the header, but with: ${helpout%%$'\n'*}"; rc=1; }
-  printf '%s\n' "$helpout" | grep -q -F -- 'scripts/gate.sh --push-main [FILE ...]' || { echo "selftest FAIL: --help does not name --push-main [FILE ...]"; rc=1; }
+  grep <<< "$helpout" -q -F -- 'scripts/gate.sh --push-main [FILE ...]' || { echo "selftest FAIL: --help does not name --push-main [FILE ...]"; rc=1; }
   # option cases (issue #66): the gate file itself, started with --fences - the code fences as the fence rule of
   # FENCE_AWK reads them, as a readout. One "FILE:LINE: kind: text" line per named line, then a last line with the
   # counts; exit 0 when every FILE was read, 2 for a FILE that is no readable file (nothing is read then). The whole
@@ -2203,7 +2250,7 @@ FAIL: skills/x/shared -> ../../shared: $why51" '#51' || rc=1
     'fences: files=1 blocks=0 long=0 inner=0 unclosed=0' inline.md || rc=1
   fences_case "8 lines, backtick runs with a backtick behind them outside and inside a block" "$t/fx" "$SELF" 0 \
     "mixed.md:8: unclosed: ${F}bash"$'\n'"fences: files=1 blocks=3 long=0 inner=0 unclosed=1" mixed.md || rc=1
-  printf '%s\n' "$helpout" | grep -q -F -- 'scripts/gate.sh --fences [FILE ...]' || { echo "selftest FAIL: --help does not name --fences [FILE ...]"; rc=1; }
+  grep <<< "$helpout" -q -F -- 'scripts/gate.sh --fences [FILE ...]' || { echo "selftest FAIL: --help does not name --fences [FILE ...]"; rc=1; }
   # link cases (issue #29): the gate file itself, started with bash in an empty directory, directly and through
   # symlinks - the last line and the exit code are those of the repo the file belongs to, never of the directory
   # above the link.
