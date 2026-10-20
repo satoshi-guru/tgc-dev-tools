@@ -86,6 +86,7 @@
 #              + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
 #              + 9 starts of the gate file with --fences - issue #66, 2 of them since issue #69,
 #              + 4 starts of install.sh whose "Done. Installed ..." line is read, 3 of them beside entries it does not copy - issue #54,
+#                and 2 beside a skill folder with nothing to install (only evals/, empty) - issue #82,
 #              + 7 runs of the step that prints the selftest's last line, each over a stand-in for the cases - issue #67)
 #              of these, one broken and one good fixture belong to check 3; they are skipped with a note if the store is absent
 set -uo pipefail
@@ -1070,6 +1071,7 @@ install_link_case() {
 # carries AGENTS "[agent]", COMMANDS "[command]" and SKILLS "[skill]" lines, and DEST holds exactly the files WANT
 # (one "./path" per line, sorted by byte value). Before issue #54 the three numbers came from ls over the source
 # folders: an entry of agents/ or commands/ that is no *.md was counted and not installed.
+# Optional 9th argument DIRS (issue #82): DEST holds exactly the directories DIRS (one "./path" per line, sorted).
 # Prints one "selftest FAIL" line with what differs below it and returns 1 when it does not hold.
 install_count_case() {
   local out err code rest line want got na nc ns why=""
@@ -1090,6 +1092,14 @@ install_count_case() {
   got="$(cd "$4" 2>/dev/null && find . -type f | LC_ALL=C sort)"
   if [ "$got" != "$8" ]; then
     why="$why"$'\n'"    the destination holds other files than wanted; got:"$'\n'"$(printf '%s\n' "$got" | sed 's/^/      | /')"
+  fi
+  # issue #82: with a 9th argument the directories of DEST are read too (one "./path" per line, sorted by byte
+  # value) - an empty skill directory holds no file, so the file list above does not see it.
+  if [ "$#" -ge 9 ]; then
+    got="$(cd "$4" 2>/dev/null && find . -mindepth 1 -type d | LC_ALL=C sort)"
+    if [ "$got" != "$9" ]; then
+      why="$why"$'\n'"    the destination holds other directories than wanted; got:"$'\n'"$(printf '%s\n' "$got" | sed 's/^/      | /')"
+    fi
   fi
   [ -z "$why" ] && return 0
   echo "selftest FAIL: $1:$why"
@@ -2316,6 +2326,26 @@ FAIL: skills/x/shared -> ../../shared: $why51" '#51' || rc=1
   install_count_case "installer, Done line with files and a directory in agents/ and commands/ that are no *.md" "$t/cwd" "$t/countsrc/mixed" "$t/countdest/mixed/.claude" 2 1 2 \
     $'./agents/a.md\n./agents/b.md\n./commands/c.md\n./skills/x/SKILL.md\n./skills/y/SKILL.md' || rc=1
   install_count_case "installer, Done line with nothing to install in agents/ and skills/" "$t/cwd" "$t/countsrc/none" "$t/countdest/none/.claude" 0 1 0 './commands/c.md' || rc=1
+  # installer skill folder cases (issue #82): a skill folder with nothing to install is no skill - the decision of
+  # issue #82, option (a), the reading the loops have for an empty folder since issue #53. Wanted: no directory of
+  # that name in the destination, no "[skill]" line for it, not counted.
+  #   countsrc/onlyevals: agent a.md, command c.md, skill x, plus skills/onlyevals/ that holds only evals/e.json -
+  #                       the measured case of the issue -> 1, 1, 1 (before: "[skill] onlyevals", "Installed 1
+  #                       agents, 1 commands, 2 skills." and an empty skills/onlyevals/ in the destination)
+  #   countsrc/hollow:    the same with an empty skills/hollow/ instead -> 1, 1, 1 (before: the same three findings)
+  # 2 starts; beside the files the directories of the destination are read.
+  for cs in onlyevals hollow; do
+    mkdir -p "$t/countsrc/$cs/agents" "$t/countsrc/$cs/commands" "$t/countsrc/$cs/skills/x" "$t/countsrc/$cs/skills/$cs"
+    cp "$cinst" "$t/countsrc/$cs/install.sh"
+    printf -- '---\nname: a\ndescription: d\n---\nbody\n' > "$t/countsrc/$cs/agents/a.md"
+    printf 'cmd\n' > "$t/countsrc/$cs/commands/c.md"
+    printf -- '---\nname: x\ndescription: d\n---\nbody\n' > "$t/countsrc/$cs/skills/x/SKILL.md"
+  done
+  mkdir -p "$t/countsrc/onlyevals/skills/onlyevals/evals"
+  printf '{}\n' > "$t/countsrc/onlyevals/skills/onlyevals/evals/e.json"
+  local cdirs=$'./agents\n./commands\n./skills\n./skills/x'
+  install_count_case "installer, skill folder that holds only evals/" "$t/cwd" "$t/countsrc/onlyevals" "$t/countdest/onlyevals/.claude" 1 1 1 "$inst" "$cdirs" || rc=1
+  install_count_case "installer, empty skill folder" "$t/cwd" "$t/countsrc/hollow" "$t/countdest/hollow/.claude" 1 1 1 "$inst" "$cdirs" || rc=1
   # installer source cases (issue #45): install.sh of this repo in a directory that is not a checkout of it,
   # started with bash in an empty directory, each time with a destination below the temp dir that does not exist.
   # Every start ends with exit 1 and one line that names the source and what it lacks, and the destination still
