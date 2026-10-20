@@ -9,11 +9,12 @@
 # topic/main. Before the COMMAND the clone stands on the local branch work (made from origin/feature, no upstream)
 # and has no local branch main. Nothing outside the temp directory is read or written: the user's and the system's
 # git configuration are switched off (so push.default is git's own default, simple), and the pushes are dry runs.
-# Usage:   scripts/branch-after-probe.sh 'COMMAND' ['COMMAND' ...]   # a COMMAND is a git command line without the word
-#                                                                   # git; several steps are joined with " ; "
-#          scripts/branch-after-probe.sh 'switch --track origin/main' 'switch main ; branch -m trunk'
-#          scripts/branch-after-probe.sh --selftest                  # 58 commands against the answers written down here
-#          scripts/branch-after-probe.sh --help                      # this header
+# The card of this file in scripts/USAGE.md (issue #86) is the first line and the 11 lines from "Usage:" on:
+# usage-cards.sh takes 12 lines per card and cuts each at 160 characters. So "Usage:" holds 3 lines; a new line in
+# "Usage:" or "Output:" pushes the "Exit:" line off the card - shorten another line of the block instead.
+# Usage:   scripts/branch-after-probe.sh 'COMMAND' ['COMMAND' ...]   # a COMMAND is a git command line without the word git; steps are joined with " ; "
+#          scripts/branch-after-probe.sh 'switch --track origin/main' 'switch main ; branch -m trunk'   # two COMMANDs, the second with two steps
+#          scripts/branch-after-probe.sh --selftest | --help         # --selftest: 58 commands against the answers written down here; --help: this header
 # Output:  one line per COMMAND "branch=B push=P push-head=H exit=N | COMMAND", then the last line
 #          "branch-after: commands=N on-main=K"
 #            branch     the branch checked out after the COMMAND ("detached" when HEAD is on no branch)

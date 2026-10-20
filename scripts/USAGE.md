@@ -20,17 +20,17 @@ Exit:    0 no retired phrase · 1 at least one · 2 usage / nothing could be rea
 ## `branch-after-probe.sh`
 ```
 branch-after-probe.sh — which branch does a git command leave checked out, and where would a push go then?
-Usage:   scripts/branch-after-probe.sh 'COMMAND' ['COMMAND' ...]   # a COMMAND is a git command line without the word
-                                                                  # git; several steps are joined with " ; "
-         scripts/branch-after-probe.sh 'switch --track origin/main' 'switch main ; branch -m trunk'
-         scripts/branch-after-probe.sh --selftest                  # 58 commands against the answers written down here
-         scripts/branch-after-probe.sh --help                      # this header
+Usage:   scripts/branch-after-probe.sh 'COMMAND' ['COMMAND' ...]   # a COMMAND is a git command line without the word git; steps are joined with " ; "
+         scripts/branch-after-probe.sh 'switch --track origin/main' 'switch main ; branch -m trunk'   # two COMMANDs, the second with two steps
+         scripts/branch-after-probe.sh --selftest | --help         # --selftest: 58 commands against the answers written down here; --help: this header
 Output:  one line per COMMAND "branch=B push=P push-head=H exit=N | COMMAND", then the last line
          "branch-after: commands=N on-main=K"
            branch     the branch checked out after the COMMAND ("detached" when HEAD is on no branch)
            push       the remote branch a `git push` without a ref would update ("refused" when git does not push)
            push-head  the remote branch a `git push origin HEAD` would update ("refused" as above)
            exit       0, or the exit code of the first step of the COMMAND that failed (the steps behind it still run)
+           on-main    how many COMMANDs left the branch main checked out
+Exit:    0 the readout was made (whatever it says) · 1 the selftest found a difference · 2 usage, or no git
 ```
 
 ## `gate.sh`
