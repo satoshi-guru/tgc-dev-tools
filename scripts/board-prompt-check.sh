@@ -16,7 +16,9 @@
 # `blackboard.py --dir BOARD prompt-texte --warum "..."` (it writes only the key that is named).
 # Not a gate check: the board directory differs per machine and changes without a commit here.
 # Usage:   scripts/board-prompt-check.sh [--board DIR] [--kernel FILE] [--root ROOT] [--retired FILE]
-#          scripts/board-prompt-check.sh --selftest   # 7 cases on temp fixtures; ~/.claude/boards is never read or written
+#          scripts/board-prompt-check.sh --selftest   # 8 cases on temp fixtures; ~/.claude/boards is never read or written;
+#                                                     # last line "selftest ok (8 cases)" (exit 0) or "selftest FAILED fail_lines=N"
+#                                                     # (exit 1; N = the "selftest FAIL: <case> ..." lines above it, issue #79)
 # Options: --board DIR     board directory that holds boards.json (default $BLACKBOARD_DIR, else ~/.claude/boards/tgc-dev-tools)
 #          --kernel FILE   the board kernel (default ~/.claude/scripts/dev/blackboard.py)
 #          --root ROOT     repo to read .claude/agents/*.md from (default: the repo this script lives in, also through a symlink)
@@ -120,6 +122,55 @@ fixture() {
   printf '%s\n' "# a comment that names a retired sentence is no phrase" "" "have drifted" > "$d/root/scripts/board-prompt-retired.txt"
 }
 
+# selftest_run CASES [COUNT] — issue #79, the form scripts/gate.sh has since issue #67: runs the function CASES (the
+# cases of the selftest), passes its output through as it comes and then prints the last line of the selftest:
+# "selftest ok (COUNT)" and returns 0 when CASES ended with 0 and printed no line that starts with "selftest FAIL:";
+# otherwise "selftest FAILED fail_lines=N" and returns 1, N being the number of those lines. Before, the cases
+# printed "selftest ok" themselves and nothing in its place on a red run, so a red run ended with a line of its last
+# failed case. The line is printed here, behind the pipe, so it is there as well when the cases stop before their
+# end. The lines are counted by bash itself, not by grep, so a red run with grep stood in is counted as well.
+selftest_run() {
+  local log code n=0 line
+  log="$(mktemp)"
+  "$1" | tee "$log"
+  code="${PIPESTATUS[0]}"
+  while IFS= read -r line; do
+    case "$line" in "selftest FAIL:"*) n=$((n + 1)) ;; esac
+  done < "$log"
+  rm -f "$log"
+  if [ "$code" -eq 0 ] && [ "$n" -eq 0 ]; then
+    echo "selftest ok${2:+ ($2)}"
+    return 0
+  fi
+  echo "selftest FAILED fail_lines=$n"
+  return 1
+}
+
+# last_line_cases — selftest case (issue #79): selftest_run over four sets of cases - green, red with two failed
+# cases and a fixture line between them, red without a line (exit 1 only), and a "selftest FAIL:" line whose case
+# did not set the exit code. Prints what differs (the output indented) and returns 1.
+last_line_cases() {
+  local rc=0 out code want cases code_want lines
+  ll_green() { echo "a note"; return 0; }
+  ll_red() { echo "selftest FAIL: one"; echo "    | a line of its fixture"; echo "selftest FAIL: two"; return 1; }
+  ll_quiet() { return 1; }
+  ll_unset() { echo "selftest FAIL: rc not set"; return 0; }
+  # "CASES EXIT LINE~LINE..." - the lines of the output, "~" between them
+  for want in "ll_green 0 a note~selftest ok (1 case)" \
+              "ll_red 1 selftest FAIL: one~    | a line of its fixture~selftest FAIL: two~selftest FAILED fail_lines=2" \
+              "ll_quiet 1 selftest FAILED fail_lines=0" \
+              "ll_unset 1 selftest FAIL: rc not set~selftest FAILED fail_lines=1"; do
+    read -r cases code_want lines <<< "$want"
+    out="$(selftest_run "$cases" "1 case")"; code=$?
+    if [ "$code" -ne "$code_want" ] || [ "$out" != "${lines//\~/$'\n'}" ]; then
+      echo "selftest FAIL: last line, $cases: want exit $code_want, got exit $code and"
+      printf '%s\n' "    | ${out//$'\n'/$'\n'    | }"
+      rc=1
+    fi
+  done
+  return "$rc"
+}
+
 selftest() {
   local t rc=0 out code stub sum lines
   t="$(mktemp -d)"
@@ -132,23 +183,23 @@ selftest() {
   # 1. nothing retired in the board texts or the role files: ok, exit 0, every count in the last line
   fixture "$t/c1" "a wrong instruction is repeated; four skills also exist in the store."
   out="$(check "$t/c1/board" "$stub" "$t/c1/root" "$t/c1/root/scripts/board-prompt-retired.txt" 2>&1)"; code=$?
-  [ "$code" -eq 0 ] || { echo "selftest FAIL 1: clean fixture gives exit $code: $out"; rc=1; }
-  [ "$out" = "board-prompt: ok phrases=1 texts=5 role-files=2" ] || { echo "selftest FAIL 1: got: $out"; rc=1; }
+  [ "$code" -eq 0 ] || { echo "selftest FAIL: 1 clean fixture gives exit $code: $out"; rc=1; }
+  [ "$out" = "board-prompt: ok phrases=1 texts=5 role-files=2" ] || { echo "selftest FAIL: 1 got: $out"; rc=1; }
 
   # 2. the case of issue #59: the board text carries the phrase (other case), the role files do not
   fixture "$t/c2" "a wrong instruction is repeated, and several skills HAVE Drifted from the copies."
   out="$(check "$t/c2/board" "$stub" "$t/c2/root" "$t/c2/root/scripts/board-prompt-retired.txt" 2>&1)"; code=$?
-  [ "$code" -eq 1 ] || { echo "selftest FAIL 2: stale board text gives exit $code"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x 'STALE board warum: "have drifted"' || { echo "selftest FAIL 2: no line for the board text: $out"; rc=1; }
-  [ "${out##*$'\n'}" = "board-prompt: STALE hits=1 phrases=1 texts=5 role-files=2" ] || { echo "selftest FAIL 2: last line: ${out##*$'\n'}"; rc=1; }
+  [ "$code" -eq 1 ] || { echo "selftest FAIL: 2 stale board text gives exit $code"; rc=1; }
+  printf '%s\n' "$out" | grep -q -x 'STALE board warum: "have drifted"' || { echo "selftest FAIL: 2 no line for the board text: $out"; rc=1; }
+  [ "${out##*$'\n'}" = "board-prompt: STALE hits=1 phrases=1 texts=5 role-files=2" ] || { echo "selftest FAIL: 2 last line: ${out##*$'\n'}"; rc=1; }
 
   # 3. the case of issue #14: a role file carries the phrase in line 3, the board text does not
   fixture "$t/c3" "four skills also exist in the store."
   printf '%s\n' "# Role b" "" "Skills here have drifted from the copies." > "$t/c3/root/.claude/agents/bb-b.md"
   out="$(check "$t/c3/board" "$stub" "$t/c3/root" "$t/c3/root/scripts/board-prompt-retired.txt" 2>&1)"; code=$?
-  [ "$code" -eq 1 ] || { echo "selftest FAIL 3: stale role file gives exit $code"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x 'STALE role .claude/agents/bb-b.md:3: "have drifted"' || { echo "selftest FAIL 3: no line for the role file: $out"; rc=1; }
-  printf '%s\n' "$out" | grep -q '^STALE board' && { echo "selftest FAIL 3: a clean board text was reported: $out"; rc=1; }
+  [ "$code" -eq 1 ] || { echo "selftest FAIL: 3 stale role file gives exit $code"; rc=1; }
+  printf '%s\n' "$out" | grep -q -x 'STALE role .claude/agents/bb-b.md:3: "have drifted"' || { echo "selftest FAIL: 3 no line for the role file: $out"; rc=1; }
+  printf '%s\n' "$out" | grep -q '^STALE board' && { echo "selftest FAIL: 3 a clean board text was reported: $out"; rc=1; }
 
   # 4. two phrases, and a text with a line break: the hit on the second line is counted for the key above it
   fixture "$t/c4" "four skills also exist in the store."
@@ -156,38 +207,38 @@ selftest() {
   printf '%s\n' "beleg_ordner: " "warum: fine." "grenzen: only your item;" "then Compare By Hand, always." \
     "selbstpruefung: green." "bb: kernel" > "$t/c4/board/texts"
   out="$(check "$t/c4/board" "$stub" "$t/c4/root" "$t/c4/root/scripts/board-prompt-retired.txt" 2>&1)"; code=$?
-  [ "$code" -eq 1 ] || { echo "selftest FAIL 4: second phrase on a continued line gives exit $code"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x 'STALE board grenzen: "compare by hand"' || { echo "selftest FAIL 4: hit not counted for grenzen: $out"; rc=1; }
-  [ "${out##*$'\n'}" = "board-prompt: STALE hits=1 phrases=2 texts=5 role-files=2" ] || { echo "selftest FAIL 4: last line: ${out##*$'\n'}"; rc=1; }
+  [ "$code" -eq 1 ] || { echo "selftest FAIL: 4 second phrase on a continued line gives exit $code"; rc=1; }
+  printf '%s\n' "$out" | grep -q -x 'STALE board grenzen: "compare by hand"' || { echo "selftest FAIL: 4 hit not counted for grenzen: $out"; rc=1; }
+  [ "${out##*$'\n'}" = "board-prompt: STALE hits=1 phrases=2 texts=5 role-files=2" ] || { echo "selftest FAIL: 4 last line: ${out##*$'\n'}"; rc=1; }
 
   # 5. nothing read is never green: exit 2 for a phrases file without a phrase, a board directory without
   #    boards.json, a missing kernel, a kernel that fails, a kernel that prints no text, an unknown option
   fixture "$t/c5" "several skills have drifted."
   printf '%s\n' "# only a comment" "" > "$t/c5/empty.txt"
   check "$t/c5/board" "$stub" "$t/c5/root" "$t/c5/empty.txt" >/dev/null 2>&1; code=$?
-  [ "$code" -eq 2 ] || { echo "selftest FAIL 5: a phrases file without a phrase gives exit $code, want 2"; rc=1; }
+  [ "$code" -eq 2 ] || { echo "selftest FAIL: 5 a phrases file without a phrase gives exit $code, want 2"; rc=1; }
   check "$t/c5/root" "$stub" "$t/c5/root" "$t/c5/root/scripts/board-prompt-retired.txt" >/dev/null 2>&1; code=$?
-  [ "$code" -eq 2 ] || { echo "selftest FAIL 5: a directory without boards.json gives exit $code, want 2"; rc=1; }
+  [ "$code" -eq 2 ] || { echo "selftest FAIL: 5 a directory without boards.json gives exit $code, want 2"; rc=1; }
   check "$t/c5/board" "$t/absent.py" "$t/c5/root" "$t/c5/root/scripts/board-prompt-retired.txt" >/dev/null 2>&1; code=$?
-  [ "$code" -eq 2 ] || { echo "selftest FAIL 5: a missing kernel gives exit $code, want 2"; rc=1; }
+  [ "$code" -eq 2 ] || { echo "selftest FAIL: 5 a missing kernel gives exit $code, want 2"; rc=1; }
   printf '%s\n' 'import sys' 'print("warum: several skills have drifted.")' 'sys.exit(3)' > "$t/failing.py"
   check "$t/c5/board" "$t/failing.py" "$t/c5/root" "$t/c5/root/scripts/board-prompt-retired.txt" >/dev/null 2>&1; code=$?
-  [ "$code" -eq 2 ] || { echo "selftest FAIL 5: a failing kernel gives exit $code, want 2"; rc=1; }
+  [ "$code" -eq 2 ] || { echo "selftest FAIL: 5 a failing kernel gives exit $code, want 2"; rc=1; }
   printf '%s\n' 'print("nothing to show")' > "$t/silent.py"
   check "$t/c5/board" "$t/silent.py" "$t/c5/root" "$t/c5/root/scripts/board-prompt-retired.txt" >/dev/null 2>&1; code=$?
-  [ "$code" -eq 2 ] || { echo "selftest FAIL 5: a kernel without a text line gives exit $code, want 2"; rc=1; }
+  [ "$code" -eq 2 ] || { echo "selftest FAIL: 5 a kernel without a text line gives exit $code, want 2"; rc=1; }
   bash "$SELF" --nope >/dev/null 2>&1; code=$?
-  [ "$code" -eq 2 ] || { echo "selftest FAIL 5: an unknown option gives exit $code, want 2"; rc=1; }
+  [ "$code" -eq 2 ] || { echo "selftest FAIL: 5 an unknown option gives exit $code, want 2"; rc=1; }
   bash "$SELF" --board >/dev/null 2>&1; code=$?
-  [ "$code" -eq 2 ] || { echo "selftest FAIL 5: an option without its value gives exit $code, want 2"; rc=1; }
+  [ "$code" -eq 2 ] || { echo "selftest FAIL: 5 an option without its value gives exit $code, want 2"; rc=1; }
 
   # 6. started through a symlink from another directory: root and phrases file are those of the repo the program
   #    file lives in, not of the directory above the link
   cp "$SELF" "$t/c2/root/scripts/board-prompt-check.sh"
   ln -s "$t/c2/root/scripts/board-prompt-check.sh" "$t/via/check.sh"
   out="$(cd "$t/cwd" && bash "$t/via/check.sh" --board "$t/c2/board" --kernel "$stub" 2>&1)"; code=$?
-  [ "$code" -eq 1 ] || { echo "selftest FAIL 6: started through a link gives exit $code, want 1: $out"; rc=1; }
-  [ "${out##*$'\n'}" = "board-prompt: STALE hits=1 phrases=1 texts=5 role-files=2" ] || { echo "selftest FAIL 6: last line: ${out##*$'\n'}"; rc=1; }
+  [ "$code" -eq 1 ] || { echo "selftest FAIL: 6 started through a link gives exit $code, want 1: $out"; rc=1; }
+  [ "${out##*$'\n'}" = "board-prompt: STALE hits=1 phrases=1 texts=5 role-files=2" ] || { echo "selftest FAIL: 6 last line: ${out##*$'\n'}"; rc=1; }
 
   # 7. the real kernel on a temp board (skipped with a note when the store is absent): its output is read the same
   #    way, the text set with prompt-texte is found, and the check leaves boards.json and the audit log as they were
@@ -200,22 +251,26 @@ selftest() {
     sum="$(cksum < "$t/real/boards.json")"
     lines="$(cat "$t/real"/audit.log.jsonl 2>/dev/null | wc -l)"
     out="$(check "$t/real" "$STORE_KERNEL" "$t/c7/root" "$t/c7/root/scripts/board-prompt-retired.txt" 2>&1)"; code=$?
-    [ "$code" -eq 1 ] || { echo "selftest FAIL 7: real kernel, stale text gives exit $code: $out"; rc=1; }
-    printf '%s\n' "$out" | grep -q -x 'STALE board warum: "have drifted"' || { echo "selftest FAIL 7: real kernel, no line for the text: $out"; rc=1; }
-    [ "${out##*$'\n'}" = "board-prompt: STALE hits=1 phrases=1 texts=5 role-files=2" ] || { echo "selftest FAIL 7: real kernel, last line: ${out##*$'\n'}"; rc=1; }
-    [ "$(cksum < "$t/real/boards.json")" = "$sum" ] || { echo "selftest FAIL 7: the check changed boards.json"; rc=1; }
-    [ "$(cat "$t/real"/audit.log.jsonl 2>/dev/null | wc -l)" = "$lines" ] || { echo "selftest FAIL 7: the check wrote to the audit log"; rc=1; }
+    [ "$code" -eq 1 ] || { echo "selftest FAIL: 7 real kernel, stale text gives exit $code: $out"; rc=1; }
+    printf '%s\n' "$out" | grep -q -x 'STALE board warum: "have drifted"' || { echo "selftest FAIL: 7 real kernel, no line for the text: $out"; rc=1; }
+    [ "${out##*$'\n'}" = "board-prompt: STALE hits=1 phrases=1 texts=5 role-files=2" ] || { echo "selftest FAIL: 7 real kernel, last line: ${out##*$'\n'}"; rc=1; }
+    [ "$(cksum < "$t/real/boards.json")" = "$sum" ] || { echo "selftest FAIL: 7 the check changed boards.json"; rc=1; }
+    [ "$(cat "$t/real"/audit.log.jsonl 2>/dev/null | wc -l)" = "$lines" ] || { echo "selftest FAIL: 7 the check wrote to the audit log"; rc=1; }
     BLACKBOARD_DIR="$t/real" python3 "$STORE_KERNEL" --dir "$t/real" prompt-texte \
       --warum "a wrong instruction is repeated; four skills also exist in the store." >/dev/null 2>&1
     out="$(check "$t/real" "$STORE_KERNEL" "$t/c7/root" "$t/c7/root/scripts/board-prompt-retired.txt" 2>&1)"; code=$?
-    [ "$code" -eq 0 ] || { echo "selftest FAIL 7: real kernel, corrected text gives exit $code: $out"; rc=1; }
-    [ "$out" = "board-prompt: ok phrases=1 texts=5 role-files=2" ] || { echo "selftest FAIL 7: real kernel, corrected text: $out"; rc=1; }
+    [ "$code" -eq 0 ] || { echo "selftest FAIL: 7 real kernel, corrected text gives exit $code: $out"; rc=1; }
+    [ "$out" = "board-prompt: ok phrases=1 texts=5 role-files=2" ] || { echo "selftest FAIL: 7 real kernel, corrected text: $out"; rc=1; }
   else
     echo "note: case 7 skipped (no board kernel at $STORE_KERNEL)"
   fi
 
   rm -rf "$t"
-  [ "$rc" -eq 0 ] && echo "selftest ok (7 cases)"
+
+  # 8. the last line of the selftest (issue #79): "selftest ok (8 cases)" or "selftest FAILED fail_lines=N"
+  last_line_cases || rc=1
+
+  # Superseded by issue #79 (selftest_run prints the last line, for both results): [ "$rc" -eq 0 ] && echo "selftest ok (7 cases)"
   return "$rc"
 }
 
@@ -225,7 +280,7 @@ ROOT="$(cd -P "$(dirname "$SELF")/.." && pwd)"
 RETIRED=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --selftest) selftest; exit $? ;;
+    --selftest) selftest_run selftest "8 cases"; exit $? ;;
     -h | --help) awk 'NR>1 && /^#/{sub(/^# ?/, ""); print; next} NR>1{exit}' "$SELF"; exit 0 ;;
     --board | --kernel | --root | --retired)
       [ $# -ge 2 ] || { echo "board-prompt-check.sh: $1 needs a value" >&2; exit 2; }

@@ -16,7 +16,9 @@
 #     <name>                       the whole skill is a FORK
 #     <name>/<file> +appendix      this file starts with the store's file byte for byte and keeps more below it
 # Usage:   scripts/skill-drift.sh [--store DIR] [--root ROOT] [--declared FILE] [NAME ...]
-#          scripts/skill-drift.sh --selftest   # 11 cases on temp fixtures; ~/.claude is never read or written
+#          scripts/skill-drift.sh --selftest   # 12 cases on temp fixtures; ~/.claude is never read or written; last line
+#                                              # "selftest ok (12 cases)" (exit 0) or "selftest FAILED fail_lines=N" (exit 1;
+#                                              # N = the "selftest FAIL: <case> ..." lines above it, issue #79)
 # Options: --store DIR      skill store to compare against (default ~/.claude/skills)
 #          --root ROOT      repo to read skills/ from (default: the repo this script lives in, also through a symlink)
 #          --declared FILE  the declarations file (default scripts/skill-drift-declared.txt); --forks is an alias
@@ -217,6 +219,55 @@ link_case() {
   return 0
 }
 
+# selftest_run CASES [COUNT] — issue #79, the form scripts/gate.sh has since issue #67: runs the function CASES (the
+# cases of the selftest), passes its output through as it comes and then prints the last line of the selftest:
+# "selftest ok (COUNT)" and returns 0 when CASES ended with 0 and printed no line that starts with "selftest FAIL:";
+# otherwise "selftest FAILED fail_lines=N" and returns 1, N being the number of those lines. Before, the cases
+# printed "selftest ok" themselves and nothing in its place on a red run, so a red run ended with a line of its last
+# failed case. The line is printed here, behind the pipe, so it is there as well when the cases stop before their
+# end. The lines are counted by bash itself, not by grep, so a red run with grep stood in is counted as well.
+selftest_run() {
+  local log code n=0 line
+  log="$(mktemp)"
+  "$1" | tee "$log"
+  code="${PIPESTATUS[0]}"
+  while IFS= read -r line; do
+    case "$line" in "selftest FAIL:"*) n=$((n + 1)) ;; esac
+  done < "$log"
+  rm -f "$log"
+  if [ "$code" -eq 0 ] && [ "$n" -eq 0 ]; then
+    echo "selftest ok${2:+ ($2)}"
+    return 0
+  fi
+  echo "selftest FAILED fail_lines=$n"
+  return 1
+}
+
+# last_line_cases — selftest case (issue #79): selftest_run over four sets of cases - green, red with two failed
+# cases and a fixture line between them, red without a line (exit 1 only), and a "selftest FAIL:" line whose case
+# did not set the exit code. Prints what differs (the output indented) and returns 1.
+last_line_cases() {
+  local rc=0 out code want cases code_want lines
+  ll_green() { echo "a note"; return 0; }
+  ll_red() { echo "selftest FAIL: one"; echo "    | a line of its fixture"; echo "selftest FAIL: two"; return 1; }
+  ll_quiet() { return 1; }
+  ll_unset() { echo "selftest FAIL: rc not set"; return 0; }
+  # "CASES EXIT LINE~LINE..." - the lines of the output, "~" between them
+  for want in "ll_green 0 a note~selftest ok (1 case)" \
+              "ll_red 1 selftest FAIL: one~    | a line of its fixture~selftest FAIL: two~selftest FAILED fail_lines=2" \
+              "ll_quiet 1 selftest FAILED fail_lines=0" \
+              "ll_unset 1 selftest FAIL: rc not set~selftest FAILED fail_lines=1"; do
+    read -r cases code_want lines <<< "$want"
+    out="$(selftest_run "$cases" "1 case")"; code=$?
+    if [ "$code" -ne "$code_want" ] || [ "$out" != "${lines//\~/$'\n'}" ]; then
+      echo "selftest FAIL: last line, $cases: want exit $code_want, got exit $code and"
+      printf '%s\n' "    | ${out//$'\n'/$'\n'    | }"
+      rc=1
+    fi
+  done
+  return "$rc"
+}
+
 selftest() {
   local t rc=0 out before_store before_root last
   t="$(mktemp -d)"
@@ -240,72 +291,72 @@ selftest() {
   before_root="$(tree_sum "$t/root")"
 
   # 1. no declaration: drifted and variant are both DRIFT, same is SAME, extra is EXTRA, local only counted
-  out="$(report "$t/root" "$t/store" "$t/noforks.txt")" && { echo "selftest FAIL 1: drift accepted"; rc=1; }
+  out="$(report "$t/root" "$t/store" "$t/noforks.txt")" && { echo "selftest FAIL: 1 drift accepted"; rc=1; }
   last="${out##*$'\n'}"
-  [ "$last" = "skill-drift: DRIFT drift=2 stale=0 same=1 extra=1 fork=0 only-here=1" ] || { echo "selftest FAIL 1: last line: $last"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "  SKILL.md here=3 store=4 diff=6" || { echo "selftest FAIL 1: no file line for drifted: $out"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "  references/guide.md only here" || { echo "selftest FAIL 1: no only-here line"; rc=1; }
-  printf '%s\n' "$out" | grep -q "elsewhere" && { echo "selftest FAIL 1: store-only skill listed"; rc=1; }
+  [ "$last" = "skill-drift: DRIFT drift=2 stale=0 same=1 extra=1 fork=0 only-here=1" ] || { echo "selftest FAIL: 1 last line: $last"; rc=1; }
+  printf '%s\n' "$out" | grep -q -x "  SKILL.md here=3 store=4 diff=6" || { echo "selftest FAIL: 1 no file line for drifted: $out"; rc=1; }
+  printf '%s\n' "$out" | grep -q -x "  references/guide.md only here" || { echo "selftest FAIL: 1 no only-here line"; rc=1; }
+  printf '%s\n' "$out" | grep -q "elsewhere" && { echo "selftest FAIL: 1 store-only skill listed"; rc=1; }
 
   # 2. variant declared as fork: FORK instead of DRIFT, still exit 1 because of drifted
-  out="$(report "$t/root" "$t/store" "$t/forks.txt")" && { echo "selftest FAIL 2: drift accepted"; rc=1; }
+  out="$(report "$t/root" "$t/store" "$t/forks.txt")" && { echo "selftest FAIL: 2 drift accepted"; rc=1; }
   last="${out##*$'\n'}"
-  [ "$last" = "skill-drift: DRIFT drift=1 stale=0 same=1 extra=1 fork=1 only-here=1" ] || { echo "selftest FAIL 2: last line: $last"; rc=1; }
-  printf '%s\n' "$out" | grep -q "^FORK   variant " || { echo "selftest FAIL 2: no FORK line"; rc=1; }
+  [ "$last" = "skill-drift: DRIFT drift=1 stale=0 same=1 extra=1 fork=1 only-here=1" ] || { echo "selftest FAIL: 2 last line: $last"; rc=1; }
+  printf '%s\n' "$out" | grep -q "^FORK   variant " || { echo "selftest FAIL: 2 no FORK line"; rc=1; }
 
   # 3. NAME filter: only the named skill is compared
-  out="$(report "$t/root" "$t/store" "$t/forks.txt" same)" || { echo "selftest FAIL 3: single identical skill rejected"; rc=1; }
-  [ "$out" = $'SAME   same\nskill-drift: in step same=1 extra=0 fork=0 only-here=0' ] || { echo "selftest FAIL 3: got: $out"; rc=1; }
+  out="$(report "$t/root" "$t/store" "$t/forks.txt" same)" || { echo "selftest FAIL: 3 single identical skill rejected"; rc=1; }
+  [ "$out" = $'SAME   same\nskill-drift: in step same=1 extra=0 fork=0 only-here=0' ] || { echo "selftest FAIL: 3 got: $out"; rc=1; }
 
   # 4. both trees are untouched after three runs (read-only)
-  [ "$(tree_sum "$t/store")" = "$before_store" ] || { echo "selftest FAIL 4: store changed"; rc=1; }
-  [ "$(tree_sum "$t/root")" = "$before_root" ] || { echo "selftest FAIL 4: root changed"; rc=1; }
+  [ "$(tree_sum "$t/store")" = "$before_store" ] || { echo "selftest FAIL: 4 store changed"; rc=1; }
+  [ "$(tree_sum "$t/root")" = "$before_root" ] || { echo "selftest FAIL: 4 root changed"; rc=1; }
 
   # 5. drifted brought in step (the fixture is edited here, not by the program): in step, the fork stays a FORK
   cp "$t/store/drifted/SKILL.md" "$t/root/skills/drifted/SKILL.md"
-  out="$(report "$t/root" "$t/store" "$t/forks.txt")" || { echo "selftest FAIL 5: reconciled tree rejected: $out"; rc=1; }
+  out="$(report "$t/root" "$t/store" "$t/forks.txt")" || { echo "selftest FAIL: 5 reconciled tree rejected: $out"; rc=1; }
   last="${out##*$'\n'}"
-  [ "$last" = "skill-drift: in step same=2 extra=1 fork=1 only-here=1" ] || { echo "selftest FAIL 5: last line: $last"; rc=1; }
+  [ "$last" = "skill-drift: in step same=2 extra=1 fork=1 only-here=1" ] || { echo "selftest FAIL: 5 last line: $last"; rc=1; }
 
   # 6. the store gains a file this repo lacks: DRIFT with "only in store"
   printf 'new\n' > "$t/store/same/NOTES.md"
-  out="$(report "$t/root" "$t/store" "$t/forks.txt")" && { echo "selftest FAIL 6: store-only file accepted"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "  NOTES.md only in store" || { echo "selftest FAIL 6: no only-in-store line"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "DRIFT  same differs=0 only-store=1 only-here=0" || { echo "selftest FAIL 6: no DRIFT line: $out"; rc=1; }
+  out="$(report "$t/root" "$t/store" "$t/forks.txt")" && { echo "selftest FAIL: 6 store-only file accepted"; rc=1; }
+  printf '%s\n' "$out" | grep -q -x "  NOTES.md only in store" || { echo "selftest FAIL: 6 no only-in-store line"; rc=1; }
+  printf '%s\n' "$out" | grep -q -x "DRIFT  same differs=0 only-store=1 only-here=0" || { echo "selftest FAIL: 6 no DRIFT line: $out"; rc=1; }
   mv "$t/store/same/NOTES.md" "$t/NOTES.md.moved"
 
   # 7. stale declarations: a fork that no longer differs, and a declared name without a skill dir
   cp "$t/store/variant/SKILL.md" "$t/root/skills/variant/SKILL.md"
   printf 'variant\nghost  # was renamed\n' > "$t/forks.txt"
-  out="$(report "$t/root" "$t/store" "$t/forks.txt")" && { echo "selftest FAIL 7: stale declarations accepted"; rc=1; }
+  out="$(report "$t/root" "$t/store" "$t/forks.txt")" && { echo "selftest FAIL: 7 stale declarations accepted"; rc=1; }
   last="${out##*$'\n'}"
-  [ "$last" = "skill-drift: DRIFT drift=0 stale=2 same=2 extra=1 fork=0 only-here=1" ] || { echo "selftest FAIL 7: last line: $last"; rc=1; }
-  printf '%s\n' "$out" | grep -q "^STALE  ghost " || { echo "selftest FAIL 7: no STALE line for ghost"; rc=1; }
+  [ "$last" = "skill-drift: DRIFT drift=0 stale=2 same=2 extra=1 fork=0 only-here=1" ] || { echo "selftest FAIL: 7 last line: $last"; rc=1; }
+  printf '%s\n' "$out" | grep -q "^STALE  ghost " || { echo "selftest FAIL: 7 no STALE line for ghost"; rc=1; }
 
   # 8. usage: a store that is not a directory, and an unknown option -> exit 2
   bash "$SELF" --root "$t/root" --store "$t/nowhere" >/dev/null 2>&1
-  [ "$?" -eq 2 ] || { echo "selftest FAIL 8: missing store did not exit 2"; rc=1; }
+  [ "$?" -eq 2 ] || { echo "selftest FAIL: 8 missing store did not exit 2"; rc=1; }
   bash "$SELF" --nonsense >/dev/null 2>&1
-  [ "$?" -eq 2 ] || { echo "selftest FAIL 8: unknown option did not exit 2"; rc=1; }
+  [ "$?" -eq 2 ] || { echo "selftest FAIL: 8 unknown option did not exit 2"; rc=1; }
 
   # 9. declared appendix: the file here starts with the store's file and keeps 2 more lines -> EXTRA, exit 0;
   #    the same file without the declaration is DRIFT
   printf 'one\ntwo\nkept 1\nkept 2\n' > "$t/root/skills/same/SKILL.md"
   printf 'same/SKILL.md +appendix   # the store content, then lines kept only here\n' > "$t/forks.txt"
-  out="$(report "$t/root" "$t/store" "$t/forks.txt" same)" || { echo "selftest FAIL 9: declared appendix rejected: $out"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "EXTRA  same only-here=0 appendix=1" || { echo "selftest FAIL 9: no EXTRA line: $out"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "  SKILL.md store content verbatim, +2 lines kept only here (declared appendix)" || { echo "selftest FAIL 9: no appendix line: $out"; rc=1; }
-  out="$(report "$t/root" "$t/store" "$t/noforks.txt" same)" && { echo "selftest FAIL 9: undeclared appendix accepted"; rc=1; }
+  out="$(report "$t/root" "$t/store" "$t/forks.txt" same)" || { echo "selftest FAIL: 9 declared appendix rejected: $out"; rc=1; }
+  printf '%s\n' "$out" | grep -q -x "EXTRA  same only-here=0 appendix=1" || { echo "selftest FAIL: 9 no EXTRA line: $out"; rc=1; }
+  printf '%s\n' "$out" | grep -q -x "  SKILL.md store content verbatim, +2 lines kept only here (declared appendix)" || { echo "selftest FAIL: 9 no appendix line: $out"; rc=1; }
+  out="$(report "$t/root" "$t/store" "$t/noforks.txt" same)" && { echo "selftest FAIL: 9 undeclared appendix accepted"; rc=1; }
 
   # 10. the declaration stops holding: the store's file changes (no longer the start) -> DRIFT;
   #     the file here loses its appendix (identical again) -> STALE
   printf 'one\nTWO\n' > "$t/store/same/SKILL.md"
-  out="$(report "$t/root" "$t/store" "$t/forks.txt" same)" && { echo "selftest FAIL 10: changed store accepted under +appendix"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "DRIFT  same differs=1 only-store=0 only-here=0" || { echo "selftest FAIL 10: no DRIFT line: $out"; rc=1; }
-  printf '%s\n' "$out" | grep -q "no longer its exact start" || { echo "selftest FAIL 10: no explanation line"; rc=1; }
+  out="$(report "$t/root" "$t/store" "$t/forks.txt" same)" && { echo "selftest FAIL: 10 changed store accepted under +appendix"; rc=1; }
+  printf '%s\n' "$out" | grep -q -x "DRIFT  same differs=1 only-store=0 only-here=0" || { echo "selftest FAIL: 10 no DRIFT line: $out"; rc=1; }
+  printf '%s\n' "$out" | grep -q "no longer its exact start" || { echo "selftest FAIL: 10 no explanation line"; rc=1; }
   cp "$t/store/same/SKILL.md" "$t/root/skills/same/SKILL.md"
-  out="$(report "$t/root" "$t/store" "$t/forks.txt" same)" && { echo "selftest FAIL 10: stale +appendix accepted"; rc=1; }
-  printf '%s\n' "$out" | grep -q "^STALE  same/SKILL.md " || { echo "selftest FAIL 10: no STALE line: $out"; rc=1; }
+  out="$(report "$t/root" "$t/store" "$t/forks.txt" same)" && { echo "selftest FAIL: 10 stale +appendix accepted"; rc=1; }
+  printf '%s\n' "$out" | grep -q "^STALE  same/SKILL.md " || { echo "selftest FAIL: 10 no STALE line: $out"; rc=1; }
 
   # 11. started through symlinks (issue #35): the program file itself, started with bash, with --store and without
   #     --root in an empty directory, directly and through links - the skills and the declarations file are those
@@ -362,7 +413,11 @@ selftest() {
   link_case "11 link to scripts/ of the repo in step, placed inside a tree with drift" "$t/cwd" "$ok" "$same" "$t/overbad/scripts/skill-drift.sh" --store "$t/lstore" || rc=1
 
   rm -rf "$t"
-  [ "$rc" -eq 0 ] && echo "selftest ok (11 cases)"
+
+  # 12. the last line of the selftest (issue #79): "selftest ok (12 cases)" or "selftest FAILED fail_lines=N"
+  last_line_cases || rc=1
+
+  # Superseded by issue #79 (selftest_run prints the last line, for both results): [ "$rc" -eq 0 ] && echo "selftest ok (11 cases)"
   return "$rc"
 }
 
@@ -374,7 +429,7 @@ FORKS=""
 NAMES=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --selftest) selftest; exit $? ;;
+    --selftest) selftest_run selftest "12 cases"; exit $? ;;
     -h|--help) awk 'NR>1 && /^#/{sub(/^# ?/, ""); print; next} NR>1{exit}' "$SELF"; exit 0 ;;
     --store|--root|--declared|--forks)
       [ "$#" -ge 2 ] || { echo "skill-drift.sh: $1 needs a value" >&2; exit 2; }

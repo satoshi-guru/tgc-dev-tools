@@ -12,7 +12,8 @@
 # install.sh into that copy and prints the status before and after; the temp dir is removed afterwards.
 # Usage:   scripts/install-status.sh [--source ROOT] <destination>             # <destination> = the .claude directory
 #          scripts/install-status.sh [--source ROOT] --rehearse <destination>  # what would an install change?
-#          scripts/install-status.sh --selftest                                # 10 cases on temp fixtures, 10 starts through symlinks among them (issue #43)
+#          scripts/install-status.sh --selftest                                # 11 cases on temp fixtures, 10 starts through symlinks among them (issue #43);
+#                                                                              # last line "selftest ok (11 cases)" (exit 0) or "selftest FAILED fail_lines=N" (exit 1; issue #79)
 # Options: --source ROOT  repo to compare against (default: the repo this script lives in, also through a symlink)
 #          --rehearse     status of a temp copy before and after install.sh; the real destination stays untouched
 # Output:  one line per tool (SAME · DIFFERS · MISSING · EXTRA, and NOTE for an evals/ folder there), then the last line
@@ -190,6 +191,55 @@ link_case() {
   return 0
 }
 
+# selftest_run CASES [COUNT] — issue #79, the form scripts/gate.sh has since issue #67: runs the function CASES (the
+# cases of the selftest), passes its output through as it comes and then prints the last line of the selftest:
+# "selftest ok (COUNT)" and returns 0 when CASES ended with 0 and printed no line that starts with "selftest FAIL:";
+# otherwise "selftest FAILED fail_lines=N" and returns 1, N being the number of those lines. Before, the cases
+# printed "selftest ok" themselves and nothing in its place on a red run, so a red run ended with a line of its last
+# failed case. The line is printed here, behind the pipe, so it is there as well when the cases stop before their
+# end. The lines are counted by bash itself, not by grep, so a red run with grep stood in is counted as well.
+selftest_run() {
+  local log code n=0 line
+  log="$(mktemp)"
+  "$1" | tee "$log"
+  code="${PIPESTATUS[0]}"
+  while IFS= read -r line; do
+    case "$line" in "selftest FAIL:"*) n=$((n + 1)) ;; esac
+  done < "$log"
+  rm -f "$log"
+  if [ "$code" -eq 0 ] && [ "$n" -eq 0 ]; then
+    echo "selftest ok${2:+ ($2)}"
+    return 0
+  fi
+  echo "selftest FAILED fail_lines=$n"
+  return 1
+}
+
+# last_line_cases — selftest case (issue #79): selftest_run over four sets of cases - green, red with two failed
+# cases and a fixture line between them, red without a line (exit 1 only), and a "selftest FAIL:" line whose case
+# did not set the exit code. Prints what differs (the output indented) and returns 1.
+last_line_cases() {
+  local rc=0 out code want cases code_want lines
+  ll_green() { echo "a note"; return 0; }
+  ll_red() { echo "selftest FAIL: one"; echo "    | a line of its fixture"; echo "selftest FAIL: two"; return 1; }
+  ll_quiet() { return 1; }
+  ll_unset() { echo "selftest FAIL: rc not set"; return 0; }
+  # "CASES EXIT LINE~LINE..." - the lines of the output, "~" between them
+  for want in "ll_green 0 a note~selftest ok (1 case)" \
+              "ll_red 1 selftest FAIL: one~    | a line of its fixture~selftest FAIL: two~selftest FAILED fail_lines=2" \
+              "ll_quiet 1 selftest FAILED fail_lines=0" \
+              "ll_unset 1 selftest FAIL: rc not set~selftest FAILED fail_lines=1"; do
+    read -r cases code_want lines <<< "$want"
+    out="$(selftest_run "$cases" "1 case")"; code=$?
+    if [ "$code" -ne "$code_want" ] || [ "$out" != "${lines//\~/$'\n'}" ]; then
+      echo "selftest FAIL: last line, $cases: want exit $code_want, got exit $code and"
+      printf '%s\n' "    | ${out//$'\n'/$'\n'    | }"
+      rc=1
+    fi
+  done
+  return "$rc"
+}
+
 selftest() {
   local t rc=0 out code
   t="$(mktemp -d)"
@@ -351,8 +401,12 @@ selftest() {
     || { echo "selftest FAIL: 10 the rehearsal through a link wrote into the destination"; rc=1; }
 
   rm -rf "$t"
+
+  # 11. the last line of the selftest (issue #79): "selftest ok (11 cases)" or "selftest FAILED fail_lines=N"
+  last_line_cases || rc=1
+
   # Superseded by issue #43 (cases 9 and 10 added): [ "$rc" -eq 0 ] && echo "selftest ok (8 cases)"
-  [ "$rc" -eq 0 ] && echo "selftest ok (10 cases)"
+  # Superseded by issue #79 (selftest_run prints the last line, for both results): [ "$rc" -eq 0 ] && echo "selftest ok (10 cases)"
   return "$rc"
 }
 
@@ -364,7 +418,7 @@ MODE=status
 DEST=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --selftest) selftest; exit $? ;;
+    --selftest) selftest_run selftest "11 cases"; exit $? ;;
     -h|--help) awk 'NR>1 && /^#/{sub(/^# ?/, ""); print; next} NR>1{exit}' "$SELF"; exit 0 ;;
     --source)
       [ $# -ge 2 ] || { echo "install-status.sh: --source needs a directory" >&2; exit 2; }

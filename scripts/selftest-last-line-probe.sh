@@ -11,21 +11,24 @@
 # and a last line that starts with "selftest FAILED".
 # The stand-in lives in a temp dir that is removed at the end; nothing is written next to PROGRAM. Only commands
 # that read can be stood in for: a program that gets nothing back from mktemp or cp would work on paths it did not
-# mean.
+# mean. readlink (issue #79) reads a link; a program that gets nothing back from it takes a link for its own path
+# and finds a wrong root - in a --selftest that works on temp fixtures that turns the cases red (the red run of
+# scripts/link-start-probe.sh), it moves no write out of the temp dirs.
 # Usage:   scripts/selftest-last-line-probe.sh [--break CMD] PROGRAM   # PROGRAM is run as it is when executable, else with bash
-#          scripts/selftest-last-line-probe.sh --selftest              # 9 cases on temp fixtures
+#          scripts/selftest-last-line-probe.sh --selftest              # 10 cases on temp fixtures
 # Options: --break CMD  the command the stand-in replaces in the second start: awk (default), grep, sed, diff,
-#                       sort, cmp or find
+#                       sort, cmp, find or readlink
 # Output:  "plain: exit=N fail_lines=K last=<last line>" and "broken (CMD): exit=N fail_lines=K last=<last line>"
 #          (fail_lines = lines that start with "selftest FAIL:"), then the last line
 #          "selftest-last-line: ok runs=2 red=R" or "selftest-last-line: NOT FIXED not_fixed=K runs=2 red=R" or
 #          "selftest-last-line: NOT MEASURED runs=2 red=0" (both runs fixed but none red: nothing known about a red run)
 # Exit:    0 both runs fixed, at least one of them red · 1 at least one run not fixed · 3 no run was red ·
-#          2 usage / PROGRAM is not a file / CMD is not one of the seven
+#          2 usage / PROGRAM is not a file / CMD is not one of the eight
 set -uo pipefail
 
 SELF="${BASH_SOURCE[0]}"
-BREAKABLE="awk grep sed diff sort cmp find"
+# Superseded by issue #79 (readlink added): BREAKABLE="awk grep sed diff sort cmp find"
+BREAKABLE="awk grep sed diff sort cmp find readlink"
 
 # run_fixed EXIT LAST — returns 0 when a run with this exit code and this last line ends the fixed way
 run_fixed() {
@@ -173,10 +176,21 @@ selftest() {
   want "--break mktemp" "$code" 2 "$out" '' || fails=$((fails + 1))
   out="$(bash "$SELF" --break 2>/dev/null)"; code=$?
   want "--break without a value" "$code" 2 "$out" '' || fails=$((fails + 1))
+  # 10. readlink can be stood in for (issue #79): the program that reads a link gets nothing back and turns red
+  ln -s new.sh "$t/link"
+  printf '%s\n' '#!/usr/bin/env bash' 'n=0' \
+    "[ \"\$(readlink '$t/link')\" = new.sh ] || { echo \"selftest FAIL: link not read\"; n=1; }" \
+    'if [ "$n" -eq 0 ]; then echo "selftest ok"; else echo "selftest FAILED fail_lines=$n"; exit 1; fi' > "$t/readlink.sh"
+  out="$(bash "$SELF" --break readlink "$t/readlink.sh")"; code=$?
+  want "program that reads a link, readlink stood in for" "$code" 0 "$out" \
+    'plain: exit=0 fail_lines=0 last=selftest ok' \
+    'broken (readlink): exit=1 fail_lines=1 last=selftest FAILED fail_lines=1' \
+    'selftest-last-line: ok runs=2 red=1' || fails=$((fails + 1))
 
   rm -rf "$t"
   if [ "$fails" -eq 0 ]; then
-    echo "selftest ok (9 cases)"
+    # Superseded by issue #79 (case 10 added): echo "selftest ok (9 cases)"
+    echo "selftest ok (10 cases)"
     return 0
   fi
   echo "selftest FAILED fail_lines=$fails"
