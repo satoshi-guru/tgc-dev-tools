@@ -96,7 +96,7 @@ Installing globally is possible, but read this first:
 ./install.sh ~/.claude
 ```
 
-`~/.claude/skills/` already holds four skills of the same name (next section). A global install overwrites them
+`~/.claude/skills/` already holds skills of the same name (next section; `scripts/skill-drift.sh` lists them). A global install overwrites them
 with the versions from this repo. Since issue #3 that is harmless for `session-init` and `design-review`, but it
 would replace the generic `start-coding-session` template of every other project with the hl_claw_bot variant and
 append the superseded block to the global `llmdoc/PRESETS.md`. Run `scripts/skill-drift.sh` first and read what it
@@ -159,7 +159,7 @@ Workflow"): the second row shows it, two files (`code-porter`, `/port-feature`, 
 copies in `hl_claw_bot` were from 2026-05-24. Only the main checkouts of the two repos were measured; a worktree of
 either repo has its own untracked `.claude` and needs its own install.
 
-Four of the installed skills (`design-review`, `llmdoc`, `session-init`, `start-coding-session`) also exist in
+These installed skills (`design-review`, `llmdoc`, `session-init`, `start-coding-session`) also exist in
 `~/.claude/skills/`. On this machine a session in either repo loads the global copy of those names; the project
 copy that the install put there is overridden (next section). `hl_claw_bot/.claude/commands/start-coding-session.md`
 does not come from this repo (here `start-coding-session` is a skill); an install neither updates nor removes it.
@@ -168,9 +168,10 @@ does not come from this repo (here `start-coding-session` is a skill); an instal
 
 ## Skills that also exist in `~/.claude/skills`
 
-Four skills of this repo have a copy of the same name in the global store `~/.claude/skills/`. Claude Code resolves
+Some skills of this repo have a copy of the same name in the global store `~/.claude/skills/` (the table below names
+them; `scripts/skill-drift.sh` measures the current set). Claude Code resolves
 a name that exists at both levels to the **personal** copy ("enterprise overrides personal, and personal overrides
-project" — Claude Code docs, skills). On this machine a session therefore loads the global copy of these four, also
+project" — Claude Code docs, skills). On this machine a session therefore loads the global copy of these skills, also
 inside a project that this repo was installed into; the copies here are the versioned record and what a machine
 without the global store gets.
 
@@ -183,7 +184,7 @@ Which copy is canonical (decided in issue #3, measured on 2026-10-03):
 | `start-coding-session` | **Both, for different projects — never synced.** This repo: the hl_claw_bot variant. Global: the generic template for every other project | differs on purpose (78 vs 98 lines), declared as a fork | here for hl_claw_bot specifics; the global template is not this repo's business |
 | `design-review` | this repo — the versioned source; the global copy is an install of it | every shared file identical; `README.md` exists only here | here by pull request; the global copy is then updated by hand, never by a board lane |
 
-The other four skills (`git-check`, `gemini-review`, `port-feature`, `analyze-trade`) exist only here.
+The other skills (`git-check`, `gemini-review`, `port-feature`, `analyze-trade`) exist only here.
 
 Measure it — read-only, it never writes to the store or to this repo:
 
@@ -199,7 +200,7 @@ scripts/skill-drift.sh --selftest    # 11 cases on temp fixtures
 - The deliberate differences are data, not memory: `scripts/skill-drift-declared.txt` holds one line per fork or
   appendix with the reason. A new difference that is not declared there turns the readout red.
 - The readout is not part of `scripts/gate.sh`: the gate has to give the same answer on every machine and must
-  not turn red because a file in `~/.claude` changed. Run it when an item concerns one of the four skills and
+  not turn red because a file in `~/.claude` changed. Run it when an item concerns one of these skills and
   before any global install.
 
 Known consequences, each with its own issue:
