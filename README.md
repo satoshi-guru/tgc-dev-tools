@@ -79,8 +79,13 @@ What the install does:
   `install.sh` (a copy of the file on its own, say), the install stops with
   `install.sh: not a checkout of tgc-dev-tools: no <folders> in <source> (nothing installed)` and exit 1, and the
   destination is not created. Until issue #45 it had made the three folders in the destination by then, and from a
-  source without `skills/` it ended with exit 0 and a skill directory named `*`. Only the three folders are looked
-  at, not what is inside them.
+  source without `skills/` it ended with exit 0 and a skill directory named `*`. Of what is inside the three
+  folders only one thing is looked at (issue #89): a `*.md` in `agents/` or `commands/` that is a symlink pointing
+  nowhere is a broken source, and the install stops with
+  `install.sh: broken link in the source <source>: agents/x.md points nowhere (nothing installed)` and exit 1,
+  before the destination is created. Until issue #89 `cp` stopped on the link after the three destination folders
+  had been made (and, for a link in `commands/`, after the agents had been installed). A link inside a skill
+  directory is not looked at (issue #98).
 - A folder that is there but holds nothing to install — `agents/` or `commands/` without a `*.md`, `skills/`
   without a directory — means "nothing of that kind to install": the rest is installed and the install ends with
   exit 0, also when all three are empty (the destination then gets three empty folders). Until issue #53 an empty
