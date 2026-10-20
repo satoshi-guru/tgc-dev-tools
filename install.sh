@@ -23,6 +23,8 @@
 # A folder that is there but holds nothing to install - agents/ or commands/ without a *.md, skills/ without a
 # directory - means "nothing of that kind to install": the rest is installed and the install ends with exit 0, also
 # when all three are empty. No start leaves an entry named "*" in the destination (issue #53).
+# A skill folder with nothing to install - empty, or nothing but evals/ - is no skill: it gets no directory in the
+# destination, no "[skill]" line and is not counted (issue #82).
 # Exit: 0 installed (also when a folder, or all three, had nothing to install) · 1 a copy failed, its own path
 #       cannot be resolved, or the source has no agents/, commands/ or skills/ (the last two: nothing installed) ·
 #       2 no destination given
@@ -145,13 +147,17 @@ for skill_dir in "$SCRIPT_DIR/skills/"*/; do
     continue   # issue #53: no directory in skills/ - the pattern stays as typed (before: a skill directory named "*")
   fi
   name=$(basename "$skill_dir")
-  mkdir -p "$DEST/skills/$name"
   # Superseded by issue #8 (copy everything, then delete: the rm also removed an evals/ folder that the
   # destination already had before the install):
   # cp -r "$skill_dir." "$DEST/skills/$name/"
   # rm -rf "$DEST/skills/$name/evals"   # evals are for testing the skill, not runtime
   # Copy the skill's entries one by one and skip evals/ (it is for testing the skill, not runtime), so
   # nothing in the destination is ever removed. The second and third pattern take the hidden entries.
+  # issue #82: the entries are collected first. A skill folder with nothing to install (empty, or only evals/) is no
+  # skill: no directory in the destination, no "[skill]" line, not counted - the reading of an empty folder since
+  # issue #53. Before, the skill directory was made before the entries were looked at, so such a folder left an empty
+  # skills/<name>/ without a SKILL.md in the destination and was printed and counted as installed.
+  entries=()
   for entry in "$skill_dir"* "$skill_dir".[!.]* "$skill_dir"..?*; do
     if [ ! -e "$entry" ] && [ ! -L "$entry" ]; then
       continue   # a pattern that matched nothing stays as typed
@@ -159,6 +165,13 @@ for skill_dir in "$SCRIPT_DIR/skills/"*/; do
     if [ "$(basename "$entry")" = "evals" ]; then
       continue
     fi
+    entries+=("$entry")
+  done
+  if [ "${#entries[@]}" -eq 0 ]; then
+    continue   # issue #82: nothing of this skill to install
+  fi
+  mkdir -p "$DEST/skills/$name"
+  for entry in "${entries[@]}"; do
     cp -r "$entry" "$DEST/skills/$name/"
   done
   echo "  [skill] $name"
