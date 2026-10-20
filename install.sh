@@ -23,9 +23,11 @@
 # A folder that is there but holds nothing to install - agents/ or commands/ without a *.md, skills/ without a
 # directory - means "nothing of that kind to install": the rest is installed and the install ends with exit 0, also
 # when all three are empty. No start leaves an entry named "*" in the destination (issue #53).
+# A *.md in agents/ or commands/ that is a symlink pointing nowhere is a broken source: the install stops with one
+# line that names it, before the destination is created (issue #89).
 # Exit: 0 installed (also when a folder, or all three, had nothing to install) · 1 a copy failed, its own path
-#       cannot be resolved, or the source has no agents/, commands/ or skills/ (the last two: nothing installed) ·
-#       2 no destination given
+#       cannot be resolved, the source has no agents/, commands/ or skills/, or a *.md in agents/ or commands/ is a
+#       broken link (the last three: nothing installed) · 2 no destination given
 
 set -euo pipefail
 
@@ -42,6 +44,7 @@ Copies agents/*.md, commands/*.md and every skills/<name>/ of this repo into
 A skill's evals/ folder is not installed; nothing in <destination> is removed.
 Without agents/, commands/ and skills/ beside install.sh nothing is installed (exit 1).
 One of the three being empty is no error: nothing of that kind is installed (exit 0).
+A *.md in agents/ or commands/ that is a broken symlink stops the install before anything is written (exit 1).
 USAGE
 }
 
@@ -94,6 +97,23 @@ for d in agents commands skills; do
 done
 if [ -n "$missing" ]; then
   echo "install.sh: not a checkout of tgc-dev-tools: no $missing in $SCRIPT_DIR (nothing installed)" >&2
+  exit 1
+fi
+
+# issue #89: a *.md in agents/ or commands/ that is a symlink pointing nowhere is a broken source (decision (a) of
+# the issue), not "nothing to install". Until then the loops below handed it to cp on purpose (the skip of issue #53
+# keeps a dangling link): cp stopped the install with exit 1 after mkdir had made agents/, commands/ and skills/ in
+# a destination that did not have them, and when the link was in commands/ the agents had been installed by then.
+# Now it is named here, before anything is written, the way issue #45 names a missing folder. A link inside a
+# skill directory is not looked at here (issue #98).
+broken=""
+for f in "$SCRIPT_DIR/agents/"*.md "$SCRIPT_DIR/commands/"*.md; do
+  if [ -L "$f" ] && [ ! -e "$f" ]; then
+    broken="${broken:+$broken, }$(basename "$(dirname "$f")")/$(basename "$f")"
+  fi
+done
+if [ -n "$broken" ]; then
+  echo "install.sh: broken link in the source $SCRIPT_DIR: $broken points nowhere (nothing installed)" >&2
   exit 1
 fi
 

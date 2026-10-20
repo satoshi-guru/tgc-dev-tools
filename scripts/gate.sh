@@ -83,6 +83,7 @@
 #              + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #              + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35,
 #                and 4 in a source without agents/, commands/ or skills/ - issue #45, and 3 with one or all of them empty - issue #53,
+#                and 2 in a source with a dangling *.md link in agents/ or commands/ - issue #89,
 #              + 8 starts of the gate file with --push-main and 1 with --help - issue #25,
 #              + 9 starts of the gate file with --fences - issue #66, 2 of them since issue #69,
 #              + 4 starts of install.sh whose "Done. Installed ..." line is read, 3 of them beside entries it does not copy - issue #54,
@@ -1107,6 +1108,37 @@ install_nosource_case() {
   local out code src want bad=0
   src="$(cd -P "$3" && pwd)"
   want="install.sh: not a checkout of tgc-dev-tools: no $5 in $src (nothing installed)"
+  out="$(cd "$2" && bash "$3/install.sh" "$4" 2>&1)"
+  code=$?
+  if [ "$code" -ne 1 ]; then
+    echo "selftest FAIL: $1: exit $code, want 1"
+    bad=1
+  fi
+  if [ "$out" != "$want" ]; then
+    echo "selftest FAIL: $1: want the one line '$want', got:"
+    printf '%s\n' "$out" | while IFS= read -r line; do printf '    | %s\n' "$line"; done
+    bad=1
+  fi
+  if [ -e "$4" ] || [ -e "$(dirname "$4")" ]; then
+    echo "selftest FAIL: $1: the destination exists after an install that failed; it holds:"
+    find "$(dirname "$4")" | LC_ALL=C sort | while IFS= read -r line; do printf '    | %s\n' "$line"; done
+    bad=1
+  fi
+  return "$bad"
+}
+
+# install_brokenlink_case WHAT DIR SRC DEST BROKEN — selftest helper (issue #89): starts the installer file
+# SRC/install.sh with bash in the directory DIR, with the destination DEST. SRC has agents/, commands/ and skills/,
+# and the entries BROKEN (as the installer names them, say "agents/x.md") are symlinks that point nowhere; neither
+# DEST nor the directory above it exists. A broken link is a broken source (decision (a) of issue #89), so wanted
+# is: exit 1, exactly one line of output - the one that names SRC and BROKEN and ends with "(nothing installed)" -
+# and afterwards neither DEST nor the directory above it exists. Before issue #89 the installer made DEST/agents,
+# DEST/commands and DEST/skills first and then stopped with a cp error on the link.
+# Prints what differs and returns 1 when it does not hold.
+install_brokenlink_case() {
+  local out code src want bad=0
+  src="$(cd -P "$3" && pwd)"
+  want="install.sh: broken link in the source $src: $5 points nowhere (nothing installed)"
   out="$(cd "$2" && bash "$3/install.sh" "$4" 2>&1)"
   code=$?
   if [ "$code" -ne 1 ]; then
@@ -2368,6 +2400,30 @@ FAIL: skills/x/shared -> ../../shared: $why51" '#51' || rc=1
     $'./agents\n./agents/a.md\n./commands\n./skills\n./skills/x\n./skills/x/SKILL.md' || rc=1
   install_empty_case "installer in a source with an empty skills/" "$t/cwd" "$t/emptysrc/skills" "$t/emptydest/skills/.claude" \
     $'./agents\n./agents/a.md\n./commands\n./commands/c.md\n./commands/c2.md\n./skills' || rc=1
+  # installer broken-link cases (issue #89): install.sh of this repo in a source that has agents/, commands/ and
+  # skills/, where one *.md is a symlink to a path that does not exist. Started with bash in an empty directory, each
+  # time with a destination below the temp dir that does not exist. A link that points nowhere is a broken source:
+  # every start ends with exit 1 and one line that names the source and the link, and the destination still does
+  # not exist afterwards.
+  #   brokensrc/agents:   agents/x.md a dangling link, commands/c1.md, skills/x/SKILL.md - the measured case of the
+  #                       issue (before: a cp error, exit 1, and agents/, commands/, skills/ left in the destination)
+  #   brokensrc/commands: agents/a.md, commands/c1.md a dangling link, skills/x/SKILL.md (before: a.md installed,
+  #                       then exit 1 on a cp error - half an install)
+  # 2 starts: 1 with the link in agents/, 1 with the link in commands/.
+  local b
+  for b in agents commands; do
+    mkdir -p "$t/brokensrc/$b/agents" "$t/brokensrc/$b/commands" "$t/brokensrc/$b/skills/x"
+    cp "$srcinst" "$t/brokensrc/$b/install.sh"
+    printf -- '---\nname: x\ndescription: d\n---\nbody\n' > "$t/brokensrc/$b/skills/x/SKILL.md"
+  done
+  ln -s "$t/brokensrc/nowhere/x.md" "$t/brokensrc/agents/agents/x.md"
+  printf 'cmd\n' > "$t/brokensrc/agents/commands/c1.md"
+  printf -- '---\nname: a\ndescription: d\n---\nbody\n' > "$t/brokensrc/commands/agents/a.md"
+  ln -s "$t/brokensrc/nowhere/c1.md" "$t/brokensrc/commands/commands/c1.md"
+  install_brokenlink_case "installer in a source with a dangling agents/x.md (the measured case)" "$t/cwd" "$t/brokensrc/agents" \
+    "$t/brokendest/agents/.claude" "agents/x.md" || rc=1
+  install_brokenlink_case "installer in a source with a dangling commands/c1.md" "$t/cwd" "$t/brokensrc/commands" \
+    "$t/brokendest/commands/.claude" "commands/c1.md" || rc=1
   # last line cases (issue #67): selftest_run - the step that runs the cases and prints the last line of the
   # selftest - over seven stand-ins for the cases. Each stand-in is a function that prints what a run of cases
   # prints and ends the way it ends; the output is passed through unchanged and one line follows it.
