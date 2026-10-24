@@ -64,7 +64,7 @@ Execute phases 2–7 from `CODING_CYCLE.md`:
 - Phase 3: `pytest` — all tests must pass before commit
 - Phase 4: `ruff check src/ tests/`
 - Phase 5: Update BUILDLOG.md + SESSION_STATE.md
-- Phase 6: Commit with type-scoped message, push
+- Phase 6: Commit with a type-scoped message; push only when the user says so ("push this" or "deploy" — README: never push without explicit user instruction)
 - Phase 7: Stop — never deploy without explicit instruction
 
 ---
@@ -74,5 +74,5 @@ Execute phases 2–7 from `CODING_CYCLE.md`:
 - Never skip the invariant checklist at Phase 6
 - Never `git add -A` — always add specific files
 - Never run `deploy.sh` without the user saying "deploy this"
-- Never edit files directly on the VPS — commit + push + deploy only
+- Never edit files directly on the VPS — changes reach the VPS only through a commit in this repo and a deploy the user ordered; this rule does not itself allow a push
 - If VPS branch is not `main` before deploying — ask first
