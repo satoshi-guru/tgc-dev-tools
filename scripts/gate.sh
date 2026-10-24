@@ -18,7 +18,8 @@
 #      the gate was green on a directory it had not looked at. The root is the repo this file belongs to: a symlink
 #      to this file or to scripts/ is resolved first (before, the root was the directory above the link)
 #   1. bash -n over install.sh and every scripts/*.sh
-#   2. agents/*.md and skills/*/SKILL.md carry YAML frontmatter with name + description;
+#   2. agents/*.md and skills/*/SKILL.md carry YAML frontmatter with name + description; every skills/<name>/
+#      has a SKILL.md (issue #100: a folder without one passed and was installed as a skill that is never loaded);
 #      commands/*.md are non-empty
 #   3. .claude/agents/*.md pass ~/.claude/scripts/dev/agent-file-check.py (skipped with a note if the store is absent).
 #      The checker is started in the repo root, because it looks up the paths an agent file names in its working
@@ -78,7 +79,8 @@
 #          --fences (issue #66) prints above its last line one "FILE:LINE: kind: text" line per fence that opens with four or more characters
 #              (long), per line inside a fenced block that starts like a fence line and does not close it (inner) and per block nothing closes
 #              (unclosed). Without FILE: the same files as --push-main
-#          --selftest (its last line: issue #67) proves that the checks fail on 28 broken fixtures and pass on 12 good ones
+#          --selftest (its last line: issue #67) proves that the checks fail on 29 broken fixtures and pass on 12 good ones
+#              (the 29th since issue #100: a skill folder without SKILL.md)
 #              (+ 29 line cases and 322 block cases for check 7,
 #              + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #              + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35,
@@ -871,6 +873,13 @@ run_checks() {
     [ -f "$f" ] || continue
     frontmatter_ok "$f" "name description" || fail "frontmatter name/description: ${f#"$root"/}"
   done
+  # issue #100: the loop above only sees a SKILL.md that is there, so a skill folder without one (for example only
+  # references/ or a PRESETS.md) passed, and install.sh installed it as a skill that Claude Code never loads.
+  # Every folder in skills/ must carry a SKILL.md; the source is wrong otherwise.
+  for f in "$root"/skills/*/; do
+    [ -d "$f" ] || continue
+    [ -f "${f}SKILL.md" ] || fail "skill folder without SKILL.md: ${f#"$root"/}"
+  done
   for f in "$root"/commands/*.md; do
     [ -f "$f" ] || continue
     [ -s "$f" ] || fail "empty command file: ${f#"$root"/}"
@@ -1290,6 +1299,15 @@ selftest() {
   out0="$(run_checks "$t/bad" 2>&1)"
   printf '%s\n' "$out0" | grep -q -x 'FAIL: bash -n install.sh' || { echo "selftest FAIL: bad fixture not rejected by check 1 (bash -n install.sh)"; rc=1; }
   printf '%s\n' "$out0" | grep -q -x 'FAIL: frontmatter name/description: agents/a.md' || { echo "selftest FAIL: bad fixture not rejected by check 2 (frontmatter of agents/a.md)"; rc=1; }
+  # noskillmd (check 2, issue #100): good fixture plus skills/nosk/ that holds PRESETS.md and references/r.md but no
+  # SKILL.md -> rejected, and check 2 names the folder. Before, the loop over skills/*/SKILL.md never saw the folder
+  # and the gate was green, while install.sh installed it as "[skill] nosk" - a skill Claude Code never loads.
+  cp -r "$t/good" "$t/noskillmd"
+  mkdir -p "$t/noskillmd/skills/nosk/references"
+  printf 'presets\n' > "$t/noskillmd/skills/nosk/PRESETS.md"
+  printf 'ref\n' > "$t/noskillmd/skills/nosk/references/r.md"
+  out0="$(run_checks "$t/noskillmd" 2>&1)" && { echo "selftest FAIL: skill folder without SKILL.md accepted (issue #100)"; rc=1; }
+  printf '%s\n' "$out0" | grep -q -x 'FAIL: skill folder without SKILL.md: skills/nosk/' || { echo "selftest FAIL: noskillmd not rejected by check 2 (skills/nosk/ without SKILL.md)"; rc=1; }
   # default: good fixture whose install.sh carries a default destination again -> rejected (check 5)
   cp -r "$t/good" "$t/default"
   printf 'DEST="${1:-/nonexistent/.claude}"\n' >> "$t/default/install.sh"
