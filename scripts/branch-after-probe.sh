@@ -22,7 +22,17 @@
 #            exit       0, or the exit code of the first step of the COMMAND that failed (the steps behind it still run)
 #            on-main    how many COMMANDs left the branch main checked out
 # Exit:    0 the readout was made (whatever it says) · 1 the selftest found a difference · 2 usage, or no git
+# Env:     BRANCH_AFTER_GIT  the git program to call (default git; exit 2 when it is not found). Issue #104:
+#                            scripts/selftest-last-line-probe.sh has no stand-in for git (git writes, so it is not one
+#                            of the commands it stands in for); a red run of the selftest from outside is made with
+#                            this instead. A stand-in that prints nothing and ends with exit 0 turns every command case
+#                            red; the program writes only into its own temp dirs, whatever the stand-in answers:
+#                            BRANCH_AFTER_GIT=/path/to/stand-in scripts/branch-after-probe.sh --selftest   # exit 1
 set -uo pipefail
+
+# the git program g calls (issue #104: the seam for a stand-in, see Env above)
+GIT="${BRANCH_AFTER_GIT:-git}"
+command -v "$GIT" >/dev/null 2>&1 || { echo "branch-after-probe.sh: git not found: $GIT" >&2; exit 2; }
 
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "${BASH_SOURCE[0]}"; }
 
@@ -33,7 +43,7 @@ g() {
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
     GIT_AUTHOR_NAME=probe GIT_AUTHOR_EMAIL=probe@example.invalid \
     GIT_COMMITTER_NAME=probe GIT_COMMITTER_EMAIL=probe@example.invalid \
-    git "$@"
+    "$GIT" "$@"
 }
 
 # make_clone DIR — DIR/origin.git (bare: main, feature, maintenance, topic/main) and DIR/clone, standing on the
@@ -111,6 +121,39 @@ want() {
   [ "$b $p $h $n" = "$wb $wp $wh $wn" ] && return 0
   echo "selftest FAIL: $c: want branch=$wb push=$wp push-head=$wh exit=$wn, got $res"
   return 1
+}
+
+# seam_cases — selftest case (issue #104): the seam BRANCH_AFTER_GIT. With a stand-in for git that prints nothing and
+# ends with exit 0, the selftest started from outside is red (exit 1) with one "selftest FAIL:" line for each of the
+# 58 commands and one for the readout case; a readout with that stand-in is still made (exit 0) and names no branch;
+# a BRANCH_AFTER_GIT that is not there ends with exit 2 and nothing on stdout. The selftest started here does not
+# run this case again (BRANCH_AFTER_NESTED). Prints what differs and returns 1.
+seam_cases() {
+  local t out code n=0 line rc=0 self="${BASH_SOURCE[0]}"
+  t="$(mktemp -d)"
+  printf '%s\n' '#!/bin/sh' 'exit 0' > "$t/git"
+  chmod +x "$t/git"
+  out="$(BRANCH_AFTER_NESTED=1 BRANCH_AFTER_GIT="$t/git" bash "$self" --selftest 2>&1)"; code=$?
+  while IFS= read -r line; do
+    case "$line" in "selftest FAIL:"*) n=$((n + 1)) ;; esac
+  done <<< "$out"
+  if [ "$code" -ne 1 ] || [ "$n" -ne 59 ]; then
+    echo "selftest FAIL: selftest with a stand-in for git: want exit 1 and fail_lines=59, got exit $code and fail_lines=$n"
+    rc=1
+  fi
+  out="$(BRANCH_AFTER_GIT="$t/git" bash "$self" 'switch --track origin/main' 2>&1)"; code=$?
+  if [ "$code" -ne 0 ] || [ "$out" != "branch= push=refused push-head=refused exit=0 | switch --track origin/main"$'\n'"branch-after: commands=1 on-main=0" ]; then
+    echo "selftest FAIL: readout with a stand-in for git: want exit 0 and no branch, got exit $code and"
+    printf '%s\n' "    | ${out//$'\n'/$'\n'    | }"
+    rc=1
+  fi
+  out="$(BRANCH_AFTER_GIT="$t/absent" bash "$self" 'branch main' 2>/dev/null)"; code=$?
+  if [ "$code" -ne 2 ] || [ -n "$out" ]; then
+    echo "selftest FAIL: BRANCH_AFTER_GIT that is not there: want exit 2 and no output, got exit $code and: $out"
+    rc=1
+  fi
+  rm -rf "$t"
+  return "$rc"
 }
 
 selftest() {
@@ -201,6 +244,8 @@ selftest() {
     *"branch=main push=main push-head=main exit=0 | switch --track origin/main"*"branch-after: commands=2 on-main=1") ;;
     *) echo "selftest FAIL: readout of two commands: $out"; rc=1 ;;
   esac
+  # the seam for a stand-in for git (issue #104), not again inside the selftest it starts
+  [ -n "${BRANCH_AFTER_NESTED:-}" ] || seam_cases || rc=1
   bash "${BASH_SOURCE[0]}" >/dev/null 2>&1
   [ $? -eq 2 ] || { echo "selftest FAIL: no command given, exit is not 2"; rc=1; }
   [ "$rc" -eq 0 ] && echo "selftest ok"

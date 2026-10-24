@@ -535,7 +535,12 @@ temp directory is touched.
 ```bash
 scripts/branch-after-probe.sh 'switch --track origin/main' 'branch -M main'   # a command is written without the word git; steps are joined with " ; "
 scripts/branch-after-probe.sh --selftest                                      # 58 commands against the answers written down in the file
+BRANCH_AFTER_GIT=/path/to/stand-in scripts/branch-after-probe.sh --selftest   # a red run from outside (issue #104): the git it calls, default git
 ```
+
+`selftest-last-line-probe.sh` (below) has no stand-in for git — git writes, so it is not one of the commands it
+stands in for — so a red run of this selftest from outside goes through `BRANCH_AFTER_GIT`: a stand-in that prints
+nothing and ends with exit 0 gives exit 1 with 59 `selftest FAIL:` lines (one per command, one for the readout).
 
 One `branch=B push=P push-head=H exit=N | COMMAND` line per command, then `branch-after: commands=N on-main=K`
 (exit 0 whatever it says; exit 2 without a command). It is not a gate check: it measures git, not this repo, and
