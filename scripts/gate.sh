@@ -184,6 +184,20 @@ FENCE_AWK='
       if (!fence) return (m > 0)
       return (m >= flen && FCH == fch && FREST ~ /^[ \t]*$/)
     }
+    # issue #72: quote_strip(s, d) drops up to d block quote markers from the front of s (d < 0: all of them) and
+    # returns the rest; QN is set to the number dropped. A marker is ">" behind at most three blanks, with one blank
+    # behind it dropped too (the CommonMark rule; a tab behind it is left). Counted by hand, as in fence_run.
+    function quote_strip(s, d,   b) {
+      QN = 0
+      while (d < 0 || QN < d) {
+        b = 0
+        while (b < 3 && substr(s, b + 1, 1) == " ") b++
+        if (substr(s, b + 1, 1) != ">") break
+        s = substr(s, b + 2); QN++
+        if (substr(s, 1, 1) == " ") s = substr(s, 2)
+      }
+      return s
+    }
 '
 
 # readme_push_main FILE — prints "LINE: text" for every line that carries a `git push` command whose pushed ref or
@@ -300,6 +314,30 @@ FENCE_AWK='
 #     has such a line, the rule changes no report in this repo.
 #     The test reads one line, as CommonMark does: a line that starts with three backticks and carries no further
 #     backtick is an opening line there as well, even when a later line would close the run as inline code.
+# Also reported since issue #72 (option 1 of that issue, the recommended one): a fenced block or an indented code
+#   block inside a block quote. The block quote markers (">" behind at most three blanks, and one blank behind it;
+#   quote_strip in FENCE_AWK) are dropped from the front of a line before the fence rule, the rule of the indented
+#   block and the words of the command read it. So a switch to main and a push without a ref in one fenced block
+#   inside a quote (every line starts with "> ") are reported, at the line of the push; before, no line of the quote
+#   was a fence line and the state lived for one line.
+#   The quote depth of the opening line is kept with the block (fq): inside the block exactly that many markers are
+#   dropped, so a further ">" is content of the block, as in CommonMark. A line with fewer markers ends the block -
+#   the quote ends there and takes the block with it (a block in CommonMark has no lazy continuation line). For a
+#   block outside every quote (depth 0) nothing changes: no marker is dropped inside it, a line that starts with ">"
+#   there is content as before. Outside a block every marker is dropped. The printed text is the line without its
+#   markers. A wrapped command is joined across markers too: the next line is read without them.
+#   Measured with scripts/gate.sh --fences before and after the change (2026-10-24): README.md and the 18 installed
+#   files carry 65 fenced blocks, none long, no inner line, none unclosed, both times.
+# Still not seen since issue #72 (option 3 of that issue for this form, decided there): a fenced block that its list
+#   item ends. In CommonMark a fenced block inside a list item ends with the item, at the first non-empty line that
+#   is indented less than the content of the item. This check does not know list items: the block runs on to the
+#   next fence line or the end of the file, and the state with it, so a push without a ref behind the item, after a
+#   switch to main inside the block, is reported although the two stand apart (a report too many, never one missed
+#   for that file; the blocks behind it are read inverted, which can hide one). Option 2 of the issue (end a block
+#   opened behind N blanks at the first non-empty line with fewer) is a rule of thumb, not the container rule: it
+#   would end a fenced block outside every list whose opening line is indented and whose content is not. Not built;
+#   filed as issue #111 with the measurement it needs. Also not followed: a quote inside a list item, a list
+#   inside a quote (the markers of the list are not dropped), a lazy continuation line of a quoted paragraph.
 # Superseded by the block above (issue #32), kept as a comment - this stood at the head of "Still not seen":
 #   an indented code block (four blanks or a tab, no fence) - a switch to main in one of its lines and a push
 #   without a ref in the next are two lines outside a fence, so the state is gone (the fourth form of issue #30,
@@ -439,20 +477,41 @@ readme_push_main() {
         # at least as long and nothing but blanks or tabs behind it closes it. Opening and closing clear the
         # state, as every fence line did before; a line that only looks like a fence line inside a block is
         # content and leaves the state as it is. A block that nothing closes lasts to the end of the file.
-        if (fence_change(L[r])) {
+        # Superseded by issue #72, kept as a comment - the state lines read L[r] with its block quote markers:
+        #   if (fence_change(L[r])) {
+        #     if (fence) fence = 0
+        #     else { fence = 1; fch = FCH; flen = FLEN }
+        #     onmain = 0; block = 0
+        #   }
+        #   else if (!fence) {
+        #     if (L[r] ~ /^[ \t]*$/) { }
+        #     else if (L[r] ~ /^(    | ? ? ?\t)/) { if (!block) onmain = 0; block = 1 }
+        #     else { onmain = 0; block = 0 }
+        #   }
+        # issue #72: the line is read without its block quote markers (quote_strip in FENCE_AWK): outside a block
+        # all of them, inside one exactly as many as the opening line had (fq). A line with fewer ends the block - the
+        # quote ends there - and is then read as a line outside every block.
+        quote_strip(L[r], -1)
+        if (fence && QN < fq) { fence = 0; onmain = 0; block = 0 }
+        qcur = quote_strip(L[r], fence ? fq : -1)
+        if (fence_change(qcur)) {
           if (fence) fence = 0
-          else { fence = 1; fch = FCH; flen = FLEN }
+          else { fence = 1; fch = FCH; flen = FLEN; fq = QN }
           onmain = 0; block = 0
         }
         else if (!fence) {
-          if (L[r] ~ /^[ \t]*$/) { }
-          else if (L[r] ~ /^(    | ? ? ?\t)/) { if (!block) onmain = 0; block = 1 }
+          if (qcur ~ /^[ \t]*$/) { }
+          else if (qcur ~ /^(    | ? ? ?\t)/) { if (!block) onmain = 0; block = 1 }
           else { onmain = 0; block = 0 }
         }
+        # the markers the lines of the join lose, with the state this line leaves
+        qd = fence ? fq : -1
         # one logical line: the physical lines r .. nx-1, joined where a line ends in a backslash
         n = 0; text = ""; nx = r
         do {
-          s = L[nx]; cont = 0
+          # Superseded by issue #72, kept as a comment - the words were read with the block quote markers:
+          #   s = L[nx]; cont = 0
+          s = (nx == r) ? qcur : quote_strip(L[nx], qd); cont = 0
           # Superseded by issue #49, kept as a comment - the fence test of the join had no limit on the indent:
           #   if (s ~ /\\$/ && nx < NR && L[nx + 1] !~ /^[ \t]*(```|~~~)/) {
           # A fence line has at most three blanks and no tab in front (see the state lines below); a line of three
@@ -463,7 +522,12 @@ readme_push_main() {
           # outside a block every fence line, inside one only the line that closes it. A line of the other
           # character, a shorter run, or a run with text behind it is content there, and a wrapped command is
           # joined with it.
-          if (s ~ /\\$/ && nx < NR && !fence_change(L[nx + 1])) {
+          # Superseded by issue #72, kept as a comment - the next line was tested with its block quote markers:
+          #   if (s ~ /\\$/ && nx < NR && !fence_change(L[nx + 1])) {
+          # issue #72: the next line is tested without its markers; inside a block a line with fewer markers than the
+          # opening line ends the block (and the join), as it does at the head of the loop.
+          if (nx < NR) { qnext = quote_strip(L[nx + 1], qd); qend = (fence && QN < fq) }
+          if (s ~ /\\$/ && nx < NR && !qend && !fence_change(qnext)) {
             cont = 1; sub(/[ \t]*\\$/, "", s)
           }
           if (nx > r) sub(/^[ \t]+/, "", s)
@@ -784,20 +848,31 @@ push_main_readout() {
 # Since issue #69 a line that starts with a run of backticks and carries a backtick behind the run is no fence line
 # for fence_run. Outside a block it opens none and is not counted; inside a block it is content and is not named as
 # an inner line either (before, it was: it started like a fence line for the rule of that time).
+# Since issue #72 a fenced block inside a block quote is counted: the markers are dropped before the rule reads the
+# line (quote_strip in FENCE_AWK), and a line with fewer markers than the opening line ends the block.
 # Carriage returns at the end of a line are dropped first, as readme_push_main does.
 fence_lines() {
   awk "$FENCE_AWK"'
-    { s = $0; sub(/\r+$/, "", s)
+    # Superseded by issue #72, kept as a comment - the line was read with its block quote markers:
+    #   { s = $0; sub(/\r+$/, "", s)
+    #     m = fence_run(s)
+    # issue #72: as in readme_push_main, the block quote markers are dropped first (all of them outside a block,
+    # as many as the opening line had inside one), and a line with fewer markers than the opening line ends the
+    # block. The text printed is the line as it stands in the file (carriage returns dropped).
+    { raw = $0; sub(/\r+$/, "", raw)
+      quote_strip(raw, -1)
+      if (fence && QN < fq) fence = 0
+      s = quote_strip(raw, fence ? fq : -1)
       m = fence_run(s)
       if (!fence) {
         if (m) {
-          fence = 1; fch = FCH; flen = FLEN; open = NR; blocks++
-          if (m >= 4) { long++; kind[NR] = "long"; text[NR] = s }
-          else text[NR] = s
+          fence = 1; fch = FCH; flen = FLEN; fq = QN; open = NR; blocks++
+          if (m >= 4) { long++; kind[NR] = "long"; text[NR] = raw }
+          else text[NR] = raw
         }
       } else if (m) {
         if (fence_change(s)) fence = 0
-        else { inner++; kind[NR] = "inner"; text[NR] = s }
+        else { inner++; kind[NR] = "inner"; text[NR] = raw }
       }
     }
     END {
@@ -1894,6 +1969,35 @@ EOF
   push_block '' "$F" 'git switch -cmain' 'git push -u origin feat/x' "$F" || rc=1
   push_block '' "$F" 'git switch -cmain' "$F" '' "$F" 'git push' "$F" || rc=1
   push_block '' 'After `git switch -cmain` the install runs.' 'Then `git push` the branch.' || rc=1
+  # block cases for check 7 (issue #72), CommonMark containers.
+  # form 19 — a fenced block or an indented code block inside a block quote: the markers (">" behind at most three
+  # blanks, one blank behind it) are dropped before the line is read (quote_strip in FENCE_AWK); inside a block as
+  # many as the opening line had, and a line with fewer ends the block. 7 reported, 5 left alone.
+  # reported: the six lines of the issue (before: no fence line, nothing reported), a nested quote, markers behind
+  # three blanks with no blank behind them, an indented code block in a quote, carriage returns, a wrapped command
+  # across markers, a line with more markers inside the block (content, as in CommonMark)
+  push_block 5 '> Update main:' '>' "> $F" '> git switch main' '> git push' "> $F" || rc=1
+  push_block 3 ">> $F" '>> git switch main' '>> git push' ">> $F" || rc=1
+  push_block 3 "   >$F" '   >git switch main' '   >git push' "   >$F" || rc=1
+  push_block 2 '>     git switch main' '>     git push' || rc=1
+  push_block 3 "> $F$R" "> git switch main$R" "> git push$R" "> $F$R" || rc=1
+  push_block 3 "> $F" '> git switch main' '> git push \' '>   --force-with-lease' "> $F" || rc=1
+  push_block 4 "> $F" '> git switch main' ">> $F" '> git push' "> $F" || rc=1
+  # also reported, unchanged: a block outside every quote drops no marker, so a line "> ```" inside it is content
+  # and does not close it
+  push_block 4 "$F" 'git switch main' "> $F" 'git push' "$F" || rc=1
+  # left alone: the quote ends at a line without a marker and takes the block with it (a block has no lazy
+  # continuation line) - a rule that dropped every marker would report the push in line 3; an empty line ends the
+  # quote too; the switch in a quote outside a block lives for one line; a wrapped command is not joined across the
+  # end of the quote
+  push_block '' "> $F" '> git switch main' 'git push' "> $F" || rc=1
+  push_block '' "> $F" '> git switch main' '' "$F" 'git push' "$F" || rc=1
+  push_block '' '> git switch main' '> git push' || rc=1
+  push_block '' "> $F" '> git switch main && \' "$F" 'git push' "$F" || rc=1
+  # form 1 of the issue, a fenced block that its list item ends, is a named limit (comment above readme_push_main,
+  # option 3 of the issue): the block runs on and the push behind the item is reported. Kept as a case so that a
+  # change of the rule shows here
+  push_block 7 '- step:' '' "  $F" '  git switch main' '' 'Some prose.' 'git push' || rc=1
   # pushwrapped / pushonmain / pushflow: the same through run_checks, like pushmain above (block at line 20). The
   # wrapped command is named at the line where it starts (21), the push without a ref at its own line (22); the
   # step-3 block of the real README (switch to main, pull, install) stays accepted.
@@ -2203,6 +2307,21 @@ FAIL: skills/x/shared -> ../../shared: $why51" '#51' || rc=1
     'fences: files=1 blocks=0 long=0 inner=0 unclosed=0' inline.md || rc=1
   fences_case "8 lines, backtick runs with a backtick behind them outside and inside a block" "$t/fx" "$SELF" 0 \
     "mixed.md:8: unclosed: ${F}bash"$'\n'"fences: files=1 blocks=3 long=0 inner=0 unclosed=1" mixed.md || rc=1
+  # 3 more starts with --fences (issue #72), 12 in all: a fenced block inside a block quote is counted.
+  #   fx/quote.md, 6 lines:    the fixture of the issue, one block in a quote (before: blocks=0)
+  #   fx/quoteend.md, 5 lines: a block in a quote that the quote ends at the line without a marker (3), then a block
+  #                            of two lines outside the quote (4-5) - two blocks, none unclosed (before: one, at line
+  #                            4, unclosed)
+  #   fx/listitem.md, 7 lines: form 1 of the issue, the named limit - the block of the list item is unclosed
+  printf '%s\n' '> Update main:' '>' "> $F" '> git switch main' '> git push' "> $F" > "$t/fx/quote.md"
+  printf '%s\n' "> $F" '> git switch main' 'git push' "$F" "$F" > "$t/fx/quoteend.md"
+  printf '%s\n' '- step:' '' "  $F" '  git switch main' '' 'Some prose.' 'git push' > "$t/fx/listitem.md"
+  fences_case "a fenced block inside a block quote" "$t/fx" "$SELF" 0 \
+    'fences: files=1 blocks=1 long=0 inner=0 unclosed=0' quote.md || rc=1
+  fences_case "a block in a quote ended by the quote, a block behind it" "$t/fx" "$SELF" 0 \
+    'fences: files=1 blocks=2 long=0 inner=0 unclosed=0' quoteend.md || rc=1
+  fences_case "a block that its list item ends (named limit)" "$t/fx" "$SELF" 0 \
+    "listitem.md:3: unclosed:   ${F}"$'\n''fences: files=1 blocks=1 long=0 inner=0 unclosed=1' listitem.md || rc=1
   printf '%s\n' "$helpout" | grep -q -F -- 'scripts/gate.sh --fences [FILE ...]' || { echo "selftest FAIL: --help does not name --fences [FILE ...]"; rc=1; }
   # link cases (issue #29): the gate file itself, started with bash in an empty directory, directly and through
   # symlinks - the last line and the exit code are those of the repo the file belongs to, never of the directory

@@ -437,7 +437,11 @@ What it checks:
    behind it is content of the block and does not end it, and a block that nothing closes runs to the end of the
    file. Since issue #69 a line that starts with three or more backticks and carries a backtick behind them is no
    fence line: it is a sentence that starts with inline code and opens no block (before, it opened one that nothing
-   closed, and every fenced block behind it was read inverted). Since issue #24 two more commands count as
+   closed, and every fenced block behind it was read inverted). Since issue #72 a code block inside a block quote
+   counts: the `>` markers in front of a line are dropped before it is read, and a line with fewer markers than the
+   opening fence line ends the block. Not followed: a fenced block that its list item ends (in CommonMark it ends
+   with the item; here it runs on to the next fence line - a report too many, and the fenced blocks behind it are
+   read inverted). Since issue #24 two more commands count as
    "`main` is checked out" for the push without a ref that follows them in the block: a switch or checkout with a
    track option in front of a remote branch `<remote>/main` (`--track`, `-t`, and `--no-track` as well — git
    derives the local name `main` from it), and a rename of the current branch to `main` with `git branch -m` or
