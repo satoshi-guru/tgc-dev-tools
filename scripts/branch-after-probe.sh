@@ -109,20 +109,6 @@ probe() {
   echo "branch-after: commands=$n on-main=$onmain"
 }
 
-# want WANT COMMAND — selftest helper: WANT is "B P H N" (branch, push, push-head, exit; N may be "any" for a
-# command git rejects, where only the state it leaves is the claim). Prints the difference and returns 1.
-want() {
-  local w="$1" c="$2" res b p h n wb wp wh wn
-  res="$(probe_one "$c")" || { echo "selftest FAIL: no throwaway clone for: $c"; return 1; }
-  read -r b p h n <<< "$res"
-  read -r wb wp wh wn <<< "$w"
-  b="${b#branch=}"; p="${p#push=}"; h="${h#push-head=}"; n="${n#exit=}"
-  [ "$wn" = "any" ] && n="any"
-  [ "$b $p $h $n" = "$wb $wp $wh $wn" ] && return 0
-  echo "selftest FAIL: $c: want branch=$wb push=$wp push-head=$wh exit=$wn, got $res"
-  return 1
-}
-
 # seam_cases — selftest case (issue #104): the seam BRANCH_AFTER_GIT. With a stand-in for git that prints nothing and
 # ends with exit 0, the selftest started from outside is red (exit 1) with one "selftest FAIL:" line for each of the
 # 58 commands and one for the readout case; a readout with that stand-in is still made (exit 0) and names no branch;
@@ -154,6 +140,20 @@ seam_cases() {
   fi
   rm -rf "$t"
   return "$rc"
+}
+
+# want WANT COMMAND — selftest helper: WANT is "B P H N" (branch, push, push-head, exit; N may be "any" for a
+# command git rejects, where only the state it leaves is the claim). Prints the difference and returns 1.
+want() {
+  local w="$1" c="$2" res b p h n wb wp wh wn
+  res="$(probe_one "$c")" || { echo "selftest FAIL: no throwaway clone for: $c"; return 1; }
+  read -r b p h n <<< "$res"
+  read -r wb wp wh wn <<< "$w"
+  b="${b#branch=}"; p="${p#push=}"; h="${h#push-head=}"; n="${n#exit=}"
+  [ "$wn" = "any" ] && n="any"
+  [ "$b $p $h $n" = "$wb $wp $wh $wn" ] && return 0
+  echo "selftest FAIL: $c: want branch=$wb push=$wp push-head=$wh exit=$wn, got $res"
+  return 1
 }
 
 selftest() {
