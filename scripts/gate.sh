@@ -1972,7 +1972,8 @@ EOF
   # block cases for check 7 (issue #72), CommonMark containers.
   # form 19 — a fenced block or an indented code block inside a block quote: the markers (">" behind at most three
   # blanks, one blank behind it) are dropped before the line is read (quote_strip in FENCE_AWK); inside a block as
-  # many as the opening line had, and a line with fewer ends the block. 7 reported, 5 left alone.
+  # many as the opening line had, and a line with fewer ends the block. 9 reported (one of them the named limit of
+  # form 1 of the issue, at the end), 4 left alone.
   # reported: the six lines of the issue (before: no fence line, nothing reported), a nested quote, markers behind
   # three blanks with no blank behind them, an indented code block in a quote, carriage returns, a wrapped command
   # across markers, a line with more markers inside the block (content, as in CommonMark)
