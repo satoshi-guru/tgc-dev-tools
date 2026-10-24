@@ -17,6 +17,9 @@
 #          "link-start: same starts=N" or "link-start: DIFFERENT differing=K starts=N"
 # Exit:    0 every start gives the direct result · 1 at least one differs · 2 usage / PROGRAM is not a file
 set -uo pipefail
+# A text is searched with `grep <<< "$text" -q ...`, never `printf '%s\n' "$text" | grep -q ...`: under pipefail the pipe
+# form is false now and then although the text matches (grep -q exits at the first match, the next write of printf
+# gets SIGPIPE, exit 141; issue #96).
 
 # real_path FILE — absolute path of FILE with every symlink resolved: a link to the file by readlink (a chain of
 # at most 40), a link in the directory part by cd -P
@@ -108,15 +111,15 @@ selftest() {
     "link-start: same starts="*) ;;
     *) echo "selftest FAIL: want 'link-start: same starts=N', got: ${out##*$'\n'}"; rc=1 ;;
   esac
-  printf '%s\n' "$out" | grep -q -x 'dir: exit=0 last=root: ok' || { echo "selftest FAIL: no line for the start through the directory link"; rc=1; }
+  grep <<< "$out" -q -x 'dir: exit=0 last=root: ok' || { echo "selftest FAIL: no line for the start through the directory link"; rc=1; }
 
   # 2. a program that does not (not executable, so it is started with bash): every link start differs, exit 1
   out="$(probe "$t/repo/scripts/naive.sh")"; code=$?
   [ "$code" -eq 1 ] || { echo "selftest FAIL: naive program not reported as different (exit $code)"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x 'direct: exit=0 last=root: ok' || { echo "selftest FAIL: naive program wrong on the direct start"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x 'file: exit=1 last=root: wrong' || { echo "selftest FAIL: file link start of the naive program not shown as wrong"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x 'chain: exit=1 last=root: wrong' || { echo "selftest FAIL: chain start of the naive program not shown as wrong"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x 'dir: exit=1 last=root: wrong' || { echo "selftest FAIL: directory link start of the naive program not shown as wrong"; rc=1; }
+  grep <<< "$out" -q -x 'direct: exit=0 last=root: ok' || { echo "selftest FAIL: naive program wrong on the direct start"; rc=1; }
+  grep <<< "$out" -q -x 'file: exit=1 last=root: wrong' || { echo "selftest FAIL: file link start of the naive program not shown as wrong"; rc=1; }
+  grep <<< "$out" -q -x 'chain: exit=1 last=root: wrong' || { echo "selftest FAIL: chain start of the naive program not shown as wrong"; rc=1; }
+  grep <<< "$out" -q -x 'dir: exit=1 last=root: wrong' || { echo "selftest FAIL: directory link start of the naive program not shown as wrong"; rc=1; }
   case "${out##*$'\n'}" in
     "link-start: DIFFERENT differing="*) ;;
     *) echo "selftest FAIL: want 'link-start: DIFFERENT ...', got: ${out##*$'\n'}"; rc=1 ;;
@@ -125,12 +128,12 @@ selftest() {
   # 3. the same exit code on every start, only the last line differs: still different
   out="$(probe "$t/repo/scripts/green.sh")"; code=$?
   [ "$code" -eq 1 ] || { echo "selftest FAIL: a start that differs only in its last line not reported (exit $code)"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x 'file: exit=0 last=checked=0: ok' || { echo "selftest FAIL: green program, file link line missing"; rc=1; }
+  grep <<< "$out" -q -x 'file: exit=0 last=checked=0: ok' || { echo "selftest FAIL: green program, file link line missing"; rc=1; }
 
   # 4. arguments reach the program
   out="$(probe "$t/repo/scripts/args.sh" one "two words")"; code=$?
   [ "$code" -eq 0 ] || { echo "selftest FAIL: args program reported as different"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x 'file: exit=0 last=args: one two words' || { echo "selftest FAIL: arguments did not reach the program"; rc=1; }
+  grep <<< "$out" -q -x 'file: exit=0 last=args: one two words' || { echo "selftest FAIL: arguments did not reach the program"; rc=1; }
 
   # 5. the probe itself, started through a link, measures the same (its own root is resolved)
   ln -s "$SELF" "$t/via/probe.sh"

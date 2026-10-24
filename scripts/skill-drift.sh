@@ -26,6 +26,9 @@
 #          "skill-drift: DRIFT drift=D stale=T same=S extra=E fork=F only-here=K"
 # Exit:    0 no undeclared drift · 1 drift or a stale declaration · 2 usage / store or root is not a directory
 set -uo pipefail
+# A text is searched with `grep <<< "$text" -q ...`, never `printf '%s\n' "$text" | grep -q ...`: under pipefail the pipe
+# form is false now and then although the text matches (grep -q exits at the first match, the next write of printf
+# gets SIGPIPE, exit 141; issue #96).
 
 # real_path FILE — absolute path of FILE with every symlink resolved (issue #35; the function scripts/gate.sh
 # carries since issue #29): a link to the file by readlink (a chain of at most 40 links, relative targets read from
@@ -209,7 +212,7 @@ link_case() {
     echo "selftest FAIL: $what: want '$want' got '$got'"
     return 1
   fi
-  if [ -n "$text" ] && ! printf '%s\n' "$out" | grep -q -x -F -- "$text"; then
+  if [ -n "$text" ] && ! grep <<< "$out" -q -x -F -- "$text"; then
     echo "selftest FAIL: $what: the output lacks the line '$text':"
     printf '%s\n' "$out"
     return 1
@@ -243,15 +246,15 @@ selftest() {
   out="$(report "$t/root" "$t/store" "$t/noforks.txt")" && { echo "selftest FAIL 1: drift accepted"; rc=1; }
   last="${out##*$'\n'}"
   [ "$last" = "skill-drift: DRIFT drift=2 stale=0 same=1 extra=1 fork=0 only-here=1" ] || { echo "selftest FAIL 1: last line: $last"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "  SKILL.md here=3 store=4 diff=6" || { echo "selftest FAIL 1: no file line for drifted: $out"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "  references/guide.md only here" || { echo "selftest FAIL 1: no only-here line"; rc=1; }
-  printf '%s\n' "$out" | grep -q "elsewhere" && { echo "selftest FAIL 1: store-only skill listed"; rc=1; }
+  grep <<< "$out" -q -x "  SKILL.md here=3 store=4 diff=6" || { echo "selftest FAIL 1: no file line for drifted: $out"; rc=1; }
+  grep <<< "$out" -q -x "  references/guide.md only here" || { echo "selftest FAIL 1: no only-here line"; rc=1; }
+  grep <<< "$out" -q "elsewhere" && { echo "selftest FAIL 1: store-only skill listed"; rc=1; }
 
   # 2. variant declared as fork: FORK instead of DRIFT, still exit 1 because of drifted
   out="$(report "$t/root" "$t/store" "$t/forks.txt")" && { echo "selftest FAIL 2: drift accepted"; rc=1; }
   last="${out##*$'\n'}"
   [ "$last" = "skill-drift: DRIFT drift=1 stale=0 same=1 extra=1 fork=1 only-here=1" ] || { echo "selftest FAIL 2: last line: $last"; rc=1; }
-  printf '%s\n' "$out" | grep -q "^FORK   variant " || { echo "selftest FAIL 2: no FORK line"; rc=1; }
+  grep <<< "$out" -q "^FORK   variant " || { echo "selftest FAIL 2: no FORK line"; rc=1; }
 
   # 3. NAME filter: only the named skill is compared
   out="$(report "$t/root" "$t/store" "$t/forks.txt" same)" || { echo "selftest FAIL 3: single identical skill rejected"; rc=1; }
@@ -270,8 +273,8 @@ selftest() {
   # 6. the store gains a file this repo lacks: DRIFT with "only in store"
   printf 'new\n' > "$t/store/same/NOTES.md"
   out="$(report "$t/root" "$t/store" "$t/forks.txt")" && { echo "selftest FAIL 6: store-only file accepted"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "  NOTES.md only in store" || { echo "selftest FAIL 6: no only-in-store line"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "DRIFT  same differs=0 only-store=1 only-here=0" || { echo "selftest FAIL 6: no DRIFT line: $out"; rc=1; }
+  grep <<< "$out" -q -x "  NOTES.md only in store" || { echo "selftest FAIL 6: no only-in-store line"; rc=1; }
+  grep <<< "$out" -q -x "DRIFT  same differs=0 only-store=1 only-here=0" || { echo "selftest FAIL 6: no DRIFT line: $out"; rc=1; }
   mv "$t/store/same/NOTES.md" "$t/NOTES.md.moved"
 
   # 7. stale declarations: a fork that no longer differs, and a declared name without a skill dir
@@ -280,7 +283,7 @@ selftest() {
   out="$(report "$t/root" "$t/store" "$t/forks.txt")" && { echo "selftest FAIL 7: stale declarations accepted"; rc=1; }
   last="${out##*$'\n'}"
   [ "$last" = "skill-drift: DRIFT drift=0 stale=2 same=2 extra=1 fork=0 only-here=1" ] || { echo "selftest FAIL 7: last line: $last"; rc=1; }
-  printf '%s\n' "$out" | grep -q "^STALE  ghost " || { echo "selftest FAIL 7: no STALE line for ghost"; rc=1; }
+  grep <<< "$out" -q "^STALE  ghost " || { echo "selftest FAIL 7: no STALE line for ghost"; rc=1; }
 
   # 8. usage: a store that is not a directory, and an unknown option -> exit 2
   bash "$SELF" --root "$t/root" --store "$t/nowhere" >/dev/null 2>&1
@@ -293,19 +296,19 @@ selftest() {
   printf 'one\ntwo\nkept 1\nkept 2\n' > "$t/root/skills/same/SKILL.md"
   printf 'same/SKILL.md +appendix   # the store content, then lines kept only here\n' > "$t/forks.txt"
   out="$(report "$t/root" "$t/store" "$t/forks.txt" same)" || { echo "selftest FAIL 9: declared appendix rejected: $out"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "EXTRA  same only-here=0 appendix=1" || { echo "selftest FAIL 9: no EXTRA line: $out"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "  SKILL.md store content verbatim, +2 lines kept only here (declared appendix)" || { echo "selftest FAIL 9: no appendix line: $out"; rc=1; }
+  grep <<< "$out" -q -x "EXTRA  same only-here=0 appendix=1" || { echo "selftest FAIL 9: no EXTRA line: $out"; rc=1; }
+  grep <<< "$out" -q -x "  SKILL.md store content verbatim, +2 lines kept only here (declared appendix)" || { echo "selftest FAIL 9: no appendix line: $out"; rc=1; }
   out="$(report "$t/root" "$t/store" "$t/noforks.txt" same)" && { echo "selftest FAIL 9: undeclared appendix accepted"; rc=1; }
 
   # 10. the declaration stops holding: the store's file changes (no longer the start) -> DRIFT;
   #     the file here loses its appendix (identical again) -> STALE
   printf 'one\nTWO\n' > "$t/store/same/SKILL.md"
   out="$(report "$t/root" "$t/store" "$t/forks.txt" same)" && { echo "selftest FAIL 10: changed store accepted under +appendix"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x "DRIFT  same differs=1 only-store=0 only-here=0" || { echo "selftest FAIL 10: no DRIFT line: $out"; rc=1; }
-  printf '%s\n' "$out" | grep -q "no longer its exact start" || { echo "selftest FAIL 10: no explanation line"; rc=1; }
+  grep <<< "$out" -q -x "DRIFT  same differs=1 only-store=0 only-here=0" || { echo "selftest FAIL 10: no DRIFT line: $out"; rc=1; }
+  grep <<< "$out" -q "no longer its exact start" || { echo "selftest FAIL 10: no explanation line"; rc=1; }
   cp "$t/store/same/SKILL.md" "$t/root/skills/same/SKILL.md"
   out="$(report "$t/root" "$t/store" "$t/forks.txt" same)" && { echo "selftest FAIL 10: stale +appendix accepted"; rc=1; }
-  printf '%s\n' "$out" | grep -q "^STALE  same/SKILL.md " || { echo "selftest FAIL 10: no STALE line: $out"; rc=1; }
+  grep <<< "$out" -q "^STALE  same/SKILL.md " || { echo "selftest FAIL 10: no STALE line: $out"; rc=1; }
 
   # 11. started through symlinks (issue #35): the program file itself, started with bash, with --store and without
   #     --root in an empty directory, directly and through links - the skills and the declarations file are those

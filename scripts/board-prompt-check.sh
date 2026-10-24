@@ -26,6 +26,9 @@
 # Exit:    0 no retired phrase · 1 at least one · 2 usage / nothing could be read (no boards.json in DIR, no kernel,
 #          the kernel failed or printed no text, no phrase in FILE) - a check that read nothing is never green
 set -uo pipefail
+# A text is searched with `grep <<< "$text" -q ...`, never `printf '%s\n' "$text" | grep -q ...`: under pipefail the pipe
+# form is false now and then although the text matches (grep -q exits at the first match, the next write of printf
+# gets SIGPIPE, exit 141; issue #96).
 
 # real_path FILE — absolute path of FILE with every symlink resolved: a link to the file by readlink (a chain of
 # at most 40), a link in the directory part by cd -P
@@ -78,7 +81,7 @@ check() {
     done
     [ -n "$key" ] || continue
     while IFS= read -r p; do
-      if printf '%s\n' "$line" | grep -q -i -F -e "$p"; then
+      if grep <<< "$line" -q -i -F -e "$p"; then
         echo "STALE board $key: \"$p\""
         hits=$((hits + 1))
       fi
@@ -139,7 +142,7 @@ selftest() {
   fixture "$t/c2" "a wrong instruction is repeated, and several skills HAVE Drifted from the copies."
   out="$(check "$t/c2/board" "$stub" "$t/c2/root" "$t/c2/root/scripts/board-prompt-retired.txt" 2>&1)"; code=$?
   [ "$code" -eq 1 ] || { echo "selftest FAIL 2: stale board text gives exit $code"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x 'STALE board warum: "have drifted"' || { echo "selftest FAIL 2: no line for the board text: $out"; rc=1; }
+  grep <<< "$out" -q -x 'STALE board warum: "have drifted"' || { echo "selftest FAIL 2: no line for the board text: $out"; rc=1; }
   [ "${out##*$'\n'}" = "board-prompt: STALE hits=1 phrases=1 texts=5 role-files=2" ] || { echo "selftest FAIL 2: last line: ${out##*$'\n'}"; rc=1; }
 
   # 3. the case of issue #14: a role file carries the phrase in line 3, the board text does not
@@ -147,8 +150,8 @@ selftest() {
   printf '%s\n' "# Role b" "" "Skills here have drifted from the copies." > "$t/c3/root/.claude/agents/bb-b.md"
   out="$(check "$t/c3/board" "$stub" "$t/c3/root" "$t/c3/root/scripts/board-prompt-retired.txt" 2>&1)"; code=$?
   [ "$code" -eq 1 ] || { echo "selftest FAIL 3: stale role file gives exit $code"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x 'STALE role .claude/agents/bb-b.md:3: "have drifted"' || { echo "selftest FAIL 3: no line for the role file: $out"; rc=1; }
-  printf '%s\n' "$out" | grep -q '^STALE board' && { echo "selftest FAIL 3: a clean board text was reported: $out"; rc=1; }
+  grep <<< "$out" -q -x 'STALE role .claude/agents/bb-b.md:3: "have drifted"' || { echo "selftest FAIL 3: no line for the role file: $out"; rc=1; }
+  grep <<< "$out" -q '^STALE board' && { echo "selftest FAIL 3: a clean board text was reported: $out"; rc=1; }
 
   # 4. two phrases, and a text with a line break: the hit on the second line is counted for the key above it
   fixture "$t/c4" "four skills also exist in the store."
@@ -157,7 +160,7 @@ selftest() {
     "selbstpruefung: green." "bb: kernel" > "$t/c4/board/texts"
   out="$(check "$t/c4/board" "$stub" "$t/c4/root" "$t/c4/root/scripts/board-prompt-retired.txt" 2>&1)"; code=$?
   [ "$code" -eq 1 ] || { echo "selftest FAIL 4: second phrase on a continued line gives exit $code"; rc=1; }
-  printf '%s\n' "$out" | grep -q -x 'STALE board grenzen: "compare by hand"' || { echo "selftest FAIL 4: hit not counted for grenzen: $out"; rc=1; }
+  grep <<< "$out" -q -x 'STALE board grenzen: "compare by hand"' || { echo "selftest FAIL 4: hit not counted for grenzen: $out"; rc=1; }
   [ "${out##*$'\n'}" = "board-prompt: STALE hits=1 phrases=2 texts=5 role-files=2" ] || { echo "selftest FAIL 4: last line: ${out##*$'\n'}"; rc=1; }
 
   # 5. nothing read is never green: exit 2 for a phrases file without a phrase, a board directory without
@@ -201,7 +204,7 @@ selftest() {
     lines="$(cat "$t/real"/audit.log.jsonl 2>/dev/null | wc -l)"
     out="$(check "$t/real" "$STORE_KERNEL" "$t/c7/root" "$t/c7/root/scripts/board-prompt-retired.txt" 2>&1)"; code=$?
     [ "$code" -eq 1 ] || { echo "selftest FAIL 7: real kernel, stale text gives exit $code: $out"; rc=1; }
-    printf '%s\n' "$out" | grep -q -x 'STALE board warum: "have drifted"' || { echo "selftest FAIL 7: real kernel, no line for the text: $out"; rc=1; }
+    grep <<< "$out" -q -x 'STALE board warum: "have drifted"' || { echo "selftest FAIL 7: real kernel, no line for the text: $out"; rc=1; }
     [ "${out##*$'\n'}" = "board-prompt: STALE hits=1 phrases=1 texts=5 role-files=2" ] || { echo "selftest FAIL 7: real kernel, last line: ${out##*$'\n'}"; rc=1; }
     [ "$(cksum < "$t/real/boards.json")" = "$sum" ] || { echo "selftest FAIL 7: the check changed boards.json"; rc=1; }
     [ "$(cat "$t/real"/audit.log.jsonl 2>/dev/null | wc -l)" = "$lines" ] || { echo "selftest FAIL 7: the check wrote to the audit log"; rc=1; }
