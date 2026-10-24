@@ -23,6 +23,9 @@
 # Exit:    0 both runs fixed, at least one of them red · 1 at least one run not fixed · 3 no run was red ·
 #          2 usage / PROGRAM is not a file / CMD is not one of the seven
 set -uo pipefail
+# A text is searched with `grep <<< "$text" -q ...`, never `printf '%s\n' "$text" | grep -q ...`: under pipefail the pipe
+# form is false now and then although the text matches (grep -q exits at the first match, the next write of printf
+# gets SIGPIPE, exit 141; issue #96). The fixture grep.sh below follows the same form.
 
 SELF="${BASH_SOURCE[0]}"
 BREAKABLE="awk grep sed diff sort cmp find"
@@ -114,7 +117,7 @@ selftest() {
     'echo "selftest FAIL: two"' 'echo "selftest FAILED fail_lines=2"' 'exit 1' > "$t/redboth.sh"
   # grep.sh: its case needs grep and not awk; executable, so it is started as it is
   printf '%s\n' '#!/usr/bin/env bash' 'n=0' \
-    'printf "x\n" | grep -q y && { echo "selftest FAIL: grep found y in x"; n=1; }' \
+    'grep <<< x -q y && { echo "selftest FAIL: grep found y in x"; n=1; }' \
     'if [ "$n" -eq 0 ]; then echo "selftest ok"; else echo "selftest FAILED fail_lines=$n"; exit 1; fi' > "$t/grep.sh"
   chmod +x "$t/grep.sh"
 
