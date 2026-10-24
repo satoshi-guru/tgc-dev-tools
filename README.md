@@ -409,7 +409,8 @@ this repo: a root without `install.sh` or without `README.md` is rejected with
 What it checks:
 
 1. `bash -n` over `install.sh` and every `scripts/*.sh`
-2. `agents/*.md` and `skills/*/SKILL.md` carry YAML frontmatter with `name` + `description`; `commands/*.md` are non-empty
+2. `agents/*.md` and `skills/*/SKILL.md` carry YAML frontmatter with `name` + `description`; every `skills/<name>/` has a
+   `SKILL.md` (a folder without one is rejected: `install.sh` would install it as a skill Claude Code never loads); `commands/*.md` are non-empty
 3. `.claude/agents/*.md` pass `~/.claude/scripts/dev/agent-file-check.py` (skipped with a note when that store is
    absent). The checker looks up the paths an agent file names in its working directory, so the gate starts it in
    the repo root — the result is the same wherever the gate itself is started from (issue #21)
