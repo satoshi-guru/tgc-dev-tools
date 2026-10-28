@@ -404,7 +404,12 @@ a symlink to `scripts/gate.sh` or to `scripts/` (issue #29 — before, a link ma
 link, and it ended with `gate: ok` there). Before any numbered check it makes sure that this root is a checkout of
 this repo: a root without `install.sh` or without `README.md` is rejected with
 `FAIL: not a checkout of this repo: no <file> in <root>` and nothing else is checked or run in it. So a deleted
-`README.md` turns the gate red; it no longer skips checks 6 and 7.
+`README.md` turns the gate red; it no longer skips checks 6 and 7. Since issue #36 the two files are not enough:
+`install.sh` must also carry the line
+`# tgc-dev-tools installer: this line is the identity scripts/gate.sh check 0 reads (issue #36)`, whole and on a
+line of its own. Another repo with its own `install.sh` and `README.md` — for example one a copy of the gate was
+put into — is rejected with `FAIL: not a checkout of this repo: install.sh in <root> has no line '<marker>'`, and
+its `install.sh` is never run. Keep that line when you edit `install.sh`.
 
 What it checks:
 
