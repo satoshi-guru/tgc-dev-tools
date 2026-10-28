@@ -26,6 +26,10 @@
 # Exit: 0 installed (also when a folder, or all three, had nothing to install) · 1 a copy failed, its own path
 #       cannot be resolved, or the source has no agents/, commands/ or skills/ (the last two: nothing installed) ·
 #       2 no destination given
+# The next line is how scripts/gate.sh tells a checkout of this repo from any other directory with an install.sh
+# and a README.md (check 0, issue #36). Keep it word for word on a line of its own; the gate never runs an
+# install.sh that lacks it.
+# tgc-dev-tools installer: this line is the identity scripts/gate.sh check 0 reads (issue #36)
 
 set -euo pipefail
 

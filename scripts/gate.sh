@@ -16,7 +16,10 @@
 #   0. the root is a checkout of this repo: it has install.sh and README.md (issue #29). A root without them is
 #      rejected and nothing else is checked or run there - before, nearly every check was skipped on such a root and
 #      the gate was green on a directory it had not looked at. The root is the repo this file belongs to: a symlink
-#      to this file or to scripts/ is resolved first (before, the root was the directory above the link)
+#      to this file or to scripts/ is resolved first (before, the root was the directory above the link).
+#      Since issue #36 install.sh must also carry the line INSTALL_MARKER (below), whole and on a line of its own:
+#      the two files alone are a marker any repo can carry, and a copy of this file in another repo's scripts/ ran
+#      that repo's install.sh in check 4. The file is only read for that line, never run
 #   1. bash -n over install.sh and every scripts/*.sh
 #   2. agents/*.md and skills/*/SKILL.md carry YAML frontmatter with name + description;
 #      commands/*.md are non-empty
@@ -78,7 +81,7 @@
 #          --fences (issue #66) prints above its last line one "FILE:LINE: kind: text" line per fence that opens with four or more characters
 #              (long), per line inside a fenced block that starts like a fence line and does not close it (inner) and per block nothing closes
 #              (unclosed). Without FILE: the same files as --push-main
-#          --selftest (its last line: issue #67) proves that the checks fail on 28 broken fixtures and pass on 12 good ones
+#          --selftest (its last line: issue #67) proves that the checks fail on 29 broken fixtures and pass on 12 good ones
 #              (+ 29 line cases and 322 block cases for check 7,
 #              + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #              + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35,
@@ -121,6 +124,9 @@ real_path() {
 SELF="$(real_path "${BASH_SOURCE[0]}")" || { echo "gate.sh: cannot resolve its own path: ${BASH_SOURCE[0]}" >&2; echo "gate: FAILED"; exit 1; }
 # the store program of check 3; one place, because the selftest skips its check 3 cases exactly when check 3 is skipped
 AGENT_CHECKER="$HOME/.claude/scripts/dev/agent-file-check.py"
+# the line check 0 wants in install.sh (issue #36), whole and on a line of its own; one place, because the selftest
+# fixtures that write their own installer carry it too
+INSTALL_MARKER='# tgc-dev-tools installer: this line is the identity scripts/gate.sh check 0 reads (issue #36)'
 FAILS=0
 
 fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
@@ -860,6 +866,12 @@ run_checks() {
   # passed with nothing checked. Such a root is rejected here, and nothing in it is read or run.
   [ -f "$root/install.sh" ] || fail "not a checkout of this repo: no install.sh in $root"
   [ -f "$root/README.md" ] || fail "not a checkout of this repo: no README.md in $root"
+  # issue #36: install.sh and README.md are a marker any repo can carry, so a copy of this file placed in another
+  # repo's scripts/ took that repo for this one and check 4 ran its install.sh. install.sh must also carry the line
+  # INSTALL_MARKER, whole and on a line of its own; the file is only read here (grep), never run.
+  if [ -f "$root/install.sh" ] && ! grep -q -F -x -- "$INSTALL_MARKER" "$root/install.sh"; then
+    fail "not a checkout of this repo: install.sh in $root has no line '$INSTALL_MARKER'"
+  fi
   [ "$FAILS" -eq 0 ] || return 1
 
   for f in "$root/install.sh" "$root"/scripts/*.sh; do
@@ -982,6 +994,7 @@ run_checks() {
 fixture_installer() {
   printf '%s\n' \
     '#!/usr/bin/env bash' \
+    "$INSTALL_MARKER" \
     'set -euo pipefail' \
     'DEST="$1"' \
     'S="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' \
@@ -1281,9 +1294,20 @@ selftest() {
   [ "$out0" = "FAIL: not a checkout of this repo: no install.sh in $t/noinstall" ] || { echo "selftest FAIL: root without install.sh, want exactly the line for install.sh, got: $out0"; rc=1; }
   out0="$(run_checks "$t/noreadme" 2>&1)" && { echo "selftest FAIL: root without README.md accepted (issue #29)"; rc=1; }
   [ "$out0" = "FAIL: not a checkout of this repo: no README.md in $t/noreadme" ] || { echo "selftest FAIL: root without README.md, want exactly the line for README.md, got: $out0"; rc=1; }
+  # foreign (check 0, issue #36): another repo with an install.sh and a README.md, as a copy of this gate placed in
+  # its scripts/ would see it - the good fixture whose install.sh is that repo's own (no marker line) and leaves a
+  # file behind when it runs. Rejected with exactly the line for the marker, and its install.sh is never run.
+  # Before issue #36 check 0 passed it, and check 4 ran that install.sh.
+  cp -r "$t/good" "$t/foreign"
+  fixture_readme "$t/foreign/README.md"
+  printf '#!/usr/bin/env bash\n# install.sh of another repo\ntouch "%s"\n' "$t/foreign-ran" > "$t/foreign/install.sh"
+  out0="$(run_checks "$t/foreign" 2>&1)" && { echo "selftest FAIL: root with a foreign install.sh accepted (issue #36)"; rc=1; }
+  [ "$out0" = "FAIL: not a checkout of this repo: install.sh in $t/foreign has no line '$INSTALL_MARKER'" ] || { echo "selftest FAIL: root with a foreign install.sh, want exactly the line for the marker, got: $out0"; rc=1; }
+  [ -e "$t/foreign-ran" ] && { echo "selftest FAIL: the foreign install.sh was run (issue #36)"; rc=1; }
   # bad: since check 0 it carries the README too, so it is still checks 1 and 2 that reject it - and they are named
   printf 'no frontmatter\n' > "$t/bad/agents/a.md"
-  printf 'echo "unterminated\n' > "$t/bad/install.sh"
+  # (since issue #36 with the marker line, so that check 0 lets it through to checks 1 and 2)
+  printf '%s\necho "unterminated\n' "$INSTALL_MARKER" > "$t/bad/install.sh"
   fixture_readme "$t/bad/README.md"
   run_checks "$t/good" >/dev/null || { echo "selftest FAIL: good fixture rejected"; rc=1; }
   run_checks "$t/bad" >/dev/null && { echo "selftest FAIL: bad fixture accepted"; rc=1; }
