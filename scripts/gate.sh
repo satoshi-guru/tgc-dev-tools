@@ -66,6 +66,8 @@
 #      its path below the root and its target. install.sh copies such a link as a link and the reader does not go
 #      behind it, so a push instruction in a file behind it was installed and not read. A skill's own evals (not
 #      installed) stays out; a symlink to a file stays allowed and is read
+#      Since issue #90 also: a symlink below skills/<name>/ whose target does not exist gets a FAIL line of its own,
+#      named by its path below the root and its target. Before, check 4 was red on it with its general line only
 # Usage:  scripts/gate.sh            # run from anywhere, also through a symlink; last line "gate: ok" (exit 0) or "gate: FAILED" (exit 1)
 #          scripts/gate.sh --selftest # last line "selftest ok" (exit 0) or "selftest FAILED fail_lines=N" (exit 1; N = the "selftest FAIL:" lines above it)
 #          scripts/gate.sh --push-main [FILE ...]  # check 7 alone, as a readout: last line "push-main: ok files=N" (exit 0) or
@@ -78,8 +80,8 @@
 #          --fences (issue #66) prints above its last line one "FILE:LINE: kind: text" line per fence that opens with four or more characters
 #              (long), per line inside a fenced block that starts like a fence line and does not close it (inner) and per block nothing closes
 #              (unclosed). Without FILE: the same files as --push-main
-#          --selftest (its last line: issue #67) proves that the checks fail on 28 broken fixtures and pass on 12 good ones
-#              (+ 29 line cases and 322 block cases for check 7,
+#          --selftest (its last line: issue #67) proves that the checks fail on 31 broken fixtures and pass on 12 good ones
+#              (3 of the broken ones with a dangling link inside a skill - issue #90; + 29 line cases and 322 block cases for check 7,
 #              + 10 starts of the gate file itself, directly and through symlinks, on a good and a broken tree - issue #29,
 #              + 6 starts of install.sh, directly and through symlinks, each into a temp destination - issue #35,
 #                and 4 in a source without agents/, commands/ or skills/ - issue #45, and 3 with one or all of them empty - issue #53,
@@ -732,6 +734,31 @@ skill_dir_links() {
   } | LC_ALL=C sort -z
 }
 
+# skill_dangling_links ROOT — prints, each ended by a NUL byte and sorted by byte value, the path of every symlink
+# below a skills/<name>/ of ROOT whose target does not exist (issue #90), at any depth of what install.sh copies.
+# The entries of a skill are taken as in skill_dir_links (three patterns, the entry named evals skipped), with one
+# difference: an entry of the skill itself that is such a link is taken too ([ -L ] next to [ -e ]), because [ -e ]
+# is false for it. Such a link turned check 4 red (install.sh copies it, diff -r cannot read it), but no line named
+# it; skill_dir_links does not print it, because [ -d ] is false for a link that leads nowhere.
+# Not printed: a link inside a directory that a skill reaches through a symlink (find does not go behind it, and
+# that link is rejected by skill_dir_links already), and a skills/<name> that is itself a dangling link (the
+# pattern skills/*/ does not match it).
+skill_dangling_links() {
+  local root="$1" f d e
+  {
+    for d in "$root"/skills/*/; do
+      [ -d "$d" ] || continue
+      for e in "$d"* "$d".[!.]* "$d"..?*; do
+        [ -e "$e" ] || [ -L "$e" ] || continue
+        [ "$(basename "$e")" = "evals" ] && continue
+        while IFS= read -r -d '' f; do
+          [ -e "$f" ] || printf '%s\0' "$f"
+        done < <(find "$e" -type l -print0)
+      done
+    done
+  } | LC_ALL=C sort -z
+}
+
 # push_main_readout [FILE...] — the option --push-main (issue #25): check 7 alone, as a readout. Runs
 # readme_push_main over every FILE and prints one "FILE:LINE: command" line per report (FILE as it was given), then
 # the last line "push-main: ok files=N" or "push-main: FOUND hits=K files=N". Returns 0 when nothing is reported, 1
@@ -968,6 +995,11 @@ run_checks() {
   while IFS= read -r -d '' f; do
     fail "${f#"$root"/} -> $(readlink "$f"): symlink to a directory inside a skill (issue #51: install.sh copies the link and not the files behind it, and check 7 does not read them - a skill carries its own files)"
   done < <(skill_dir_links "$root")
+  # issue #90: a symlink inside a skill that leads nowhere turned check 4 red with its general line only, so the
+  # link had to be found by hand. One FAIL per such link (skill_dangling_links), named the same way.
+  while IFS= read -r -d '' f; do
+    fail "${f#"$root"/} -> $(readlink "$f"): symlink inside a skill that leads nowhere (issue #90: install.sh copies the link, and in a project it leads nowhere as well - put the file into the skill or remove the link)"
+  done < <(skill_dangling_links "$root")
   while IFS= read -r -d '' f; do
     while IFS= read -r out; do
       [ -n "$out" ] || continue
@@ -2109,6 +2141,27 @@ FAIL: skills/x/shared -> ../../shared: $why51" '#51' || rc=1
     printf '%s\n' "$out"
     rc=1
   }
+  # dangling link cases (issue #90): the listed fixture plus a symlink inside skills/x whose target does not exist.
+  # Before issue #90 the only FAIL line was the general one of check 4 (install.sh copies the link, diff -r cannot
+  # read it); now one more line names the link and its target as the link carries it. 3 rejected.
+  #   tooldangle:     skills/x/gone -> ../../nowhere, relative, an entry of the skill itself ([ -e ] is false for it)
+  #   tooldangleabs:  skills/x/gone -> an absolute path in the temp dir that does not exist
+  #   tooldangledeep: skills/x/references/gone -> nowhere, one folder deep
+  local why90='symlink inside a skill that leads nowhere (issue #90: install.sh copies the link, and in a project it leads nowhere as well - put the file into the skill or remove the link)'
+  cp -r "$t/listed" "$t/tooldangle"
+  ln -s ../../nowhere "$t/tooldangle/skills/x/gone"
+  tool_file_case "relative symlink inside a skill that leads nowhere" "$t/tooldangle" "FAIL: $why4
+FAIL: skills/x/gone -> ../../nowhere: $why90" '#90' || rc=1
+  cp -r "$t/listed" "$t/tooldangleabs"
+  ln -s "$t/tooldangleabs/nowhere-abs" "$t/tooldangleabs/skills/x/gone"
+  tool_file_case "absolute symlink inside a skill that leads nowhere" "$t/tooldangleabs" "FAIL: $why4
+FAIL: skills/x/gone -> $t/tooldangleabs/nowhere-abs: $why90" '#90' || rc=1
+  cp -r "$t/listed" "$t/tooldangledeep"
+  mkdir -p "$t/tooldangledeep/skills/x/references"
+  printf '# flow\n\nno command here\n' > "$t/tooldangledeep/skills/x/references/flow.md"
+  ln -s nowhere "$t/tooldangledeep/skills/x/references/gone"
+  tool_file_case "symlink one folder deep inside a skill that leads nowhere" "$t/tooldangledeep" "FAIL: $why4
+FAIL: skills/x/references/gone -> nowhere: $why90" '#90' || rc=1
   # option cases (issue #25): the gate file itself, started with --push-main - check 7 alone, as a readout. One
   # "FILE:LINE: command" line per report, then a last line with the counts; exit 0 nothing reported, 1 reported,
   # 2 a FILE that is no readable file (nothing is read then). The whole output is compared, line for line.

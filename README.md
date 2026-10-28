@@ -465,7 +465,11 @@ What it checks:
    `FAIL: skills/<name>/<path> -> <target>: symlink to a directory inside a skill …`, one line per link at any depth.
    `install.sh` copies such a link as a link, so the files behind it reach a project only on the machine of the
    install, and the check does not read them — a skill carries its own files. Put the files into the skill instead.
-   A skill's own `evals` is not installed and stays out of the rule; a symlink to a file stays allowed and is read
+   A skill's own `evals` is not installed and stays out of the rule; a symlink to a file stays allowed and is read.
+   Since issue #90 a symlink inside a skill whose target does not exist gets a line of its own as well,
+   `FAIL: skills/<name>/<path> -> <target>: symlink inside a skill that leads nowhere …`; before, only the general
+   line of the install check (`install.sh did not copy every entry of every skill`) was red and the link had to be
+   found by hand
 
 Check 7 can be run on its own, as a readout that changes nothing:
 
