@@ -7,3 +7,8 @@
 # ~/.claude/skills; one is a declared fork, one carries a declared appendix, and scripts/skill-drift.sh says
 # "in step". A lane that reads "have drifted" compares by hand again or reports a drift that is already declared.
 have drifted
+
+# Issues #60 (role file, README) and #105 (board text): the number of skills that also exist in ~/.claude/skills is
+# not written as a word. scripts/skill-drift.sh lists that set and measures it; a written count ("four") goes stale
+# the day a shared skill is added or retired, and a lane then reads a number that skill-drift.sh contradicts.
+four skills
